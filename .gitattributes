@@ -1,0 +1,12 @@
+# Keep text files normalized in Git while preserving Windows launcher behavior.
+* text=auto
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.py text eol=lf
+*.R text eol=lf
+*.r text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.csv text eol=lf

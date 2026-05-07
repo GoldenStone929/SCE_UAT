@@ -1,0 +1,28 @@
+# Generated UAT evidence. These folders are recreated by run_uat.py.
+outputs/**
+reports/**
+
+# Keep folder names visible in local working copies if placeholders are added later.
+!outputs/
+!outputs/python/
+!outputs/r/
+!outputs/generated_documents/
+!outputs/logs/
+!outputs/test_results/
+!reports/
+
+# Local archives created for transfer attempts.
+*.zip
+
+# Runtime/cache files.
+__pycache__/
+*.py[cod]
+.Rhistory
+.RData
+.Rproj.user/
+
+# OS/editor noise.
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

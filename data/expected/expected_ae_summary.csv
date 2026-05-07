@@ -1,0 +1,7 @@
+metric,expected_value
+total_ae_records,8
+subjects_with_ae,6
+serious_ae_records,2
+treatment_related_ae_records,4
+severe_ae_records,1
+ae_start_after_end_records,1

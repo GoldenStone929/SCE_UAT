@@ -1,0 +1,9 @@
+{
+  "project_name": "SCE_UAT_R_Python_Test_Package",
+  "required_python_tests": true,
+  "required_r_tests": true,
+  "allow_optional_package_tests": true,
+  "allow_document_generation_tests": true,
+  "treat_missing_optional_packages_as_failure": false,
+  "output_timezone": "local"
+}

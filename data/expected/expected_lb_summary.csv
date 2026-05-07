@@ -1,0 +1,7 @@
+metric,expected_value
+total_lb_records,12
+alt_high_records,2
+ast_high_records,1
+missing_lab_unit_records,1
+non_numeric_lab_result_records,1
+abnormal_high_lab_records,3

@@ -1,0 +1,16 @@
+{
+  "total_subjects": 10,
+  "safety_subjects": 9,
+  "total_ae_records": 8,
+  "subjects_with_ae": 6,
+  "serious_ae_records": 2,
+  "treatment_related_ae_records": 4,
+  "severe_ae_records": 1,
+  "ae_start_after_end_records": 1,
+  "total_lb_records": 12,
+  "alt_high_records": 2,
+  "ast_high_records": 1,
+  "missing_lab_unit_records": 1,
+  "non_numeric_lab_result_records": 1,
+  "abnormal_high_lab_records": 3
+}
