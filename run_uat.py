@@ -47,6 +47,16 @@ REPORT_FIELDNAMES = [
 ]
 
 ALLOWED_STATUSES = {"PASS", "FAIL", "WARNING", "NOT_AVAILABLE", "SKIPPED", "ERROR"}
+RUN_LOCK_FILE = ROOT / "outputs" / ".sce_uat_run.lock"
+STARTUP_ERROR_FILE = ROOT / "reports" / "startup_error.txt"
+
+
+class RunLockError(RuntimeError):
+    pass
+
+
+class StartupCleanupPermissionError(PermissionError):
+    pass
 
 
 def now_iso() -> str:
@@ -70,8 +80,63 @@ def ensure_directories() -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def discover_rscript() -> str | None:
+    configured_rscript = os.environ.get("SCE_UAT_RSCRIPT", "").strip()
+    if configured_rscript:
+        configured_path = Path(configured_rscript).expanduser()
+        if configured_path.is_file():
+            return str(configured_path.resolve())
+    return shutil.which("Rscript")
+
+
 def _assert_within_root(path: Path) -> None:
     path.resolve().relative_to(ROOT.resolve())
+
+
+def acquire_run_lock() -> None:
+    RUN_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with RUN_LOCK_FILE.open("x", encoding="utf-8") as handle:
+            handle.write(
+                f"pid={os.getpid()}\n"
+                f"timestamp={now_iso()}\n"
+                f"python={sys.executable}\n"
+            )
+    except FileExistsError as exc:
+        raise RunLockError(
+            f"SCE UAT run lock already exists at {safe_rel(RUN_LOCK_FILE)}; another run may be active."
+        ) from exc
+
+
+def release_run_lock() -> None:
+    try:
+        RUN_LOCK_FILE.unlink()
+    except FileNotFoundError:
+        return
+    except Exception as exc:
+        print(f"WARNING: Failed to remove run lock file {RUN_LOCK_FILE}: {exc}", file=sys.stderr)
+
+
+def write_startup_error_file(message: str, exc: Exception) -> None:
+    payload = "\n".join(
+        [
+            "SCE UAT startup permission failure",
+            f"Timestamp: {now_iso()}",
+            f"Project root: {ROOT}",
+            "",
+            message,
+            "",
+            f"Error: {exc}",
+        ]
+    )
+    try:
+        STARTUP_ERROR_FILE.parent.mkdir(parents=True, exist_ok=True)
+        STARTUP_ERROR_FILE.write_text(payload, encoding="utf-8")
+    except Exception as report_exc:
+        print(
+            f"WARNING: Could not write startup error report to {STARTUP_ERROR_FILE}: {report_exc}",
+            file=sys.stderr,
+        )
 
 
 def clean_generated_artifacts(root: Path) -> dict:
@@ -88,6 +153,8 @@ def clean_generated_artifacts(root: Path) -> dict:
         directory.mkdir(parents=True, exist_ok=True)
         for child in directory.iterdir():
             _assert_within_root(child)
+            if child == RUN_LOCK_FILE:
+                continue
             if child.is_dir():
                 shutil.rmtree(child)
                 summary["removed_directories"] += 1
@@ -813,7 +880,7 @@ def add_file_evidence_record(records: list[dict], test_id: str, layer: str, lang
 def skip_r_records(records: list[dict], required_r_tests: bool) -> None:
     status = "FAIL" if required_r_tests else "SKIPPED"
     expected = "Rscript is available for required R tests." if required_r_tests else "R tests skipped when R is unavailable."
-    actual = "Rscript was not found on the system path."
+    actual = "Rscript was not found via SCE_UAT_RSCRIPT or on the system path."
     r_tests = [
         ("r_smoke", "Layer 1", "R smoke test"),
         ("r_io", "Layer 2", "R file I/O test"),
@@ -837,7 +904,10 @@ def skip_r_records(records: list[dict], required_r_tests: bool) -> None:
 
 
 def run_uat() -> tuple[str, list[dict]]:
-    cleanup_summary = clean_generated_artifacts(ROOT)
+    try:
+        cleanup_summary = clean_generated_artifacts(ROOT)
+    except PermissionError as exc:
+        raise StartupCleanupPermissionError(str(exc)) from exc
     config = load_config()
     required_r_tests = bool(config.get("required_r_tests", True))
     allow_optional_package_tests = bool(config.get("allow_optional_package_tests", True))
@@ -846,7 +916,7 @@ def run_uat() -> tuple[str, list[dict]]:
     run_timestamp = now_iso()
     run_id = "SCE_UAT_" + datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    rscript_path = shutil.which("Rscript")
+    rscript_path = discover_rscript()
     inventory = collect_environment_inventory(rscript_path)
 
     records.append(
@@ -886,9 +956,9 @@ def run_uat() -> tuple[str, list[dict]]:
             language="R",
             test_name="Rscript detection",
             status=r_detection_status,
-            expected_result="Rscript is discoverable through the system path.",
+            expected_result="Rscript is discoverable via SCE_UAT_RSCRIPT or through the system path.",
             actual_result=rscript_path or "Rscript was not found.",
-            error_message="" if rscript_path else "Rscript was not found on the system path.",
+            error_message="" if rscript_path else "Rscript was not found via SCE_UAT_RSCRIPT or on the system path.",
         )
     )
 
@@ -1228,7 +1298,7 @@ def write_emergency_error_report(exc: Exception) -> None:
             "timestamp": now_iso(),
             "root_path": str(ROOT),
             "python_executable": sys.executable,
-            "rscript_path": shutil.which("Rscript") or "",
+            "rscript_path": discover_rscript() or "",
             "overall_status": "ERROR",
             "report_files": [
                 "reports/environment_report.txt",
@@ -1260,15 +1330,33 @@ def print_summary(status: str, records: list[dict]) -> None:
 
 
 def main() -> int:
+    lock_acquired = False
     try:
+        acquire_run_lock()
+        lock_acquired = True
         status, records = run_uat()
         print_summary(status, records)
         return 0 if status in {"PASS", "PASS_WITH_WARNINGS"} else 1
+    except RunLockError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except StartupCleanupPermissionError as exc:
+        message = (
+            "SCE UAT startup failed due to permission errors while cleaning outputs/ and reports/. "
+            "The runner requires create, write, read, append, and delete permissions in both folders."
+        )
+        print(message, file=sys.stderr)
+        print(str(exc), file=sys.stderr)
+        write_startup_error_file(message, exc)
+        return 1
     except Exception as exc:
         write_emergency_error_report(exc)
         print("SCE UAT runner encountered an unexpected error.", file=sys.stderr)
         print(str(exc), file=sys.stderr)
         return 1
+    finally:
+        if lock_acquired:
+            release_run_lock()
 
 
 if __name__ == "__main__":

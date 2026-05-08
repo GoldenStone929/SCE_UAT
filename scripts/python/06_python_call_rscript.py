@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 import csv
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -21,11 +22,20 @@ def read_metric_csv(path, value_column):
         return {row["metric"]: row[value_column] for row in csv.DictReader(handle)}
 
 
+def discover_rscript():
+    configured_rscript = os.environ.get("SCE_UAT_RSCRIPT", "").strip()
+    if configured_rscript:
+        configured_path = Path(configured_rscript).expanduser()
+        if configured_path.is_file():
+            return str(configured_path.resolve())
+    return shutil.which("Rscript")
+
+
 def main():
     root = get_root()
     result_file = root / "outputs" / "test_results" / "python_calls_r_validation.json"
     result_file.parent.mkdir(parents=True, exist_ok=True)
-    rscript_path = shutil.which("Rscript")
+    rscript_path = discover_rscript()
     r_script = root / "scripts" / "r" / "04_r_clinical_summary.R"
     r_output = root / "outputs" / "r" / "ae_summary_from_r.csv"
     expected_file = root / "data" / "expected" / "expected_ae_summary.csv"
@@ -46,9 +56,9 @@ def main():
 
     if not rscript_path:
         result["status"] = "FAIL"
-        result["stderr"] = "Rscript was not found on the system path."
+        result["stderr"] = "Rscript was not found via SCE_UAT_RSCRIPT or on the system path."
         result_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
-        print("Rscript was not found.", file=sys.stderr)
+        print("Rscript was not found via SCE_UAT_RSCRIPT or on the system path.", file=sys.stderr)
         return 1
 
     completed = subprocess.run(
