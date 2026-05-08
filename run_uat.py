@@ -26,8 +26,9 @@ GENERATED_ROOT_DIRS = [
 
 OUTPUT_DIRS = [
     ROOT / "outputs" / "python",
+    ROOT / "outputs" / "python" / "generated_documents",
     ROOT / "outputs" / "r",
-    ROOT / "outputs" / "generated_documents",
+    ROOT / "outputs" / "r" / "generated_documents",
     ROOT / "outputs" / "logs",
     ROOT / "outputs" / "test_results",
     ROOT / "reports",
@@ -81,13 +82,114 @@ def ensure_directories() -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def _valid_rscript_path(candidate: Path | str | None) -> str | None:
+    if not candidate:
+        return None
+    path = Path(candidate).expanduser()
+    if path.is_file():
+        return str(path.resolve())
+    return None
+
+
+def _rscript_candidates_from_r_executable(r_executable: str | None) -> list[Path]:
+    if not r_executable:
+        return []
+    r_path = Path(r_executable).expanduser()
+    candidates = [r_path.parent / "Rscript.exe", r_path.parent / "Rscript"]
+    if r_path.name.lower() in {"r.exe", "r"}:
+        candidates.extend([r_path.with_name("Rscript.exe"), r_path.with_name("Rscript")])
+    return candidates
+
+
+def _windows_registry_rscript_candidates() -> list[Path]:
+    if platform.system().lower() != "windows":
+        return []
+    candidates: list[Path] = []
+    try:
+        import winreg  # type: ignore
+    except Exception:
+        return candidates
+
+    registry_roots = [winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE]
+    registry_keys = [
+        r"Software\R-core\R",
+        r"Software\R-core\R64",
+        r"Software\WOW6432Node\R-core\R",
+        r"Software\WOW6432Node\R-core\R64",
+    ]
+    for root_key in registry_roots:
+        for key_name in registry_keys:
+            try:
+                with winreg.OpenKey(root_key, key_name) as key:
+                    install_path, _ = winreg.QueryValueEx(key, "InstallPath")
+                    if install_path:
+                        install_root = Path(str(install_path))
+                        candidates.extend(
+                            [
+                                install_root / "bin" / "Rscript.exe",
+                                install_root / "bin" / "x64" / "Rscript.exe",
+                                install_root / "bin" / "i386" / "Rscript.exe",
+                            ]
+                        )
+            except OSError:
+                continue
+    return candidates
+
+
+def _windows_env_rscript_candidates() -> list[Path]:
+    if platform.system().lower() != "windows":
+        return []
+    candidates: list[Path] = []
+    for env_name in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        base_value = os.environ.get(env_name, "").strip()
+        if not base_value:
+            continue
+        base_path = Path(base_value)
+        search_roots = [base_path / "R"]
+        if env_name == "LOCALAPPDATA":
+            search_roots.append(base_path / "Programs" / "R")
+        for search_root in search_roots:
+            if not search_root.exists():
+                continue
+            for child in search_root.glob("R-*"):
+                candidates.extend(
+                    [
+                        child / "bin" / "Rscript.exe",
+                        child / "bin" / "x64" / "Rscript.exe",
+                        child / "bin" / "i386" / "Rscript.exe",
+                    ]
+                )
+    return candidates
+
+
 def discover_rscript() -> str | None:
+    candidates: list[Path | str | None] = []
+
     configured_rscript = os.environ.get("SCE_UAT_RSCRIPT", "").strip()
-    if configured_rscript:
-        configured_path = Path(configured_rscript).expanduser()
-        if configured_path.is_file():
-            return str(configured_path.resolve())
-    return shutil.which("Rscript")
+    candidates.append(configured_rscript or None)
+    candidates.append(shutil.which("Rscript"))
+
+    r_home = os.environ.get("R_HOME", "").strip()
+    if r_home:
+        r_home_path = Path(r_home)
+        candidates.extend([r_home_path / "bin" / "Rscript.exe", r_home_path / "bin" / "Rscript"])
+
+    candidates.extend(_rscript_candidates_from_r_executable(os.environ.get("RSTUDIO_WHICH_R", "").strip()))
+    candidates.extend(_windows_registry_rscript_candidates())
+    candidates.extend(_windows_env_rscript_candidates())
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        candidate_key = str(candidate)
+        if candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        valid = _valid_rscript_path(candidate)
+        if valid:
+            return valid
+    return None
 
 
 def _assert_within_root(path: Path) -> None:
@@ -719,10 +821,6 @@ def layer_sort_key(layer_name: str) -> tuple[int, str]:
     return 999, layer_name
 
 
-def status_xor_marks(status: str) -> tuple[str, str]:
-    return ("", "V") if status == "PASS" else ("X", "")
-
-
 def grouped_records_by_layer(records: list[dict]) -> list[tuple[str, list[dict]]]:
     grouped: dict[str, list[dict]] = {}
     for record in records:
@@ -754,78 +852,82 @@ def pdf_safe_text(text: str) -> str:
     return latin_text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
-def build_pdf_report_lines(run_timestamp: str, status: str, inventory: dict, records: list[dict]) -> list[str]:
+def build_markdown_report(run_timestamp: str, status: str, inventory: dict, records: list[dict]) -> str:
     counts = count_statuses(records)
     lines = [
-        "SCE UAT Validation Final All-in-One Report",
-        "Target environment: Windows-based SCE (Windows Server 2019 primary).",
-        f"Run timestamp: {run_timestamp}",
-        f"Overall status: {status}",
-        f"Project root: {inventory.get('python', {}).get('project_root', str(ROOT))}",
-        "Root runner: run_uat.py",
+        "# SCE UAT Validation Report",
         "",
-        "Overall status counts:",
-        (
-            "PASS={PASS} FAIL={FAIL} WARNING={WARNING} NOT_AVAILABLE={NOT_AVAILABLE} "
-            "SKIPPED={SKIPPED} ERROR={ERROR}"
-        ).format(
-            PASS=counts.get("PASS", 0),
-            FAIL=counts.get("FAIL", 0),
-            WARNING=counts.get("WARNING", 0),
-            NOT_AVAILABLE=counts.get("NOT_AVAILABLE", 0),
-            SKIPPED=counts.get("SKIPPED", 0),
-            ERROR=counts.get("ERROR", 0),
-        ),
+        "## Run Summary",
         "",
-        "Section table XOR rule: each row is marked either X or V (PASS -> V, non-PASS -> X).",
+        f"- Target environment: Windows Server 2019 SCE",
+        f"- Run timestamp: {run_timestamp}",
+        f"- Overall status: {status}",
+        f"- Project root: {inventory.get('python', {}).get('project_root', str(ROOT))}",
+        "- Root runner: run_uat.py",
+        "",
+        "## Status Counts",
+        "",
+        f"- PASS: {counts.get('PASS', 0)}",
+        f"- FAIL: {counts.get('FAIL', 0)}",
+        f"- WARNING: {counts.get('WARNING', 0)}",
+        f"- NOT_AVAILABLE: {counts.get('NOT_AVAILABLE', 0)}",
+        f"- SKIPPED: {counts.get('SKIPPED', 0)}",
+        f"- ERROR: {counts.get('ERROR', 0)}",
+        "",
+        "## Environment Summary",
+        "",
+        f"- Python executable: {inventory.get('python', {}).get('executable', '')}",
+        f"- Rscript found: {inventory.get('r', {}).get('rscript_found', '')}",
+        f"- Rscript path: {inventory.get('r', {}).get('rscript_path', '')}",
+        f"- R version: {inventory.get('r', {}).get('r_version', '')}",
+        f"- Platform: {inventory.get('system', {}).get('platform', '')}",
+        "",
+        "## Detailed Test Results",
+        "",
     ]
 
     for layer_name, layer_records in grouped_records_by_layer(records):
         section_counts = count_statuses(layer_records)
-        lines.append("")
-        lines.append(f"Section: {layer_name}")
-        lines.append(
-            (
-                "Section counts: PASS={PASS} FAIL={FAIL} WARNING={WARNING} "
-                "NOT_AVAILABLE={NOT_AVAILABLE} SKIPPED={SKIPPED} ERROR={ERROR}"
-            ).format(
-                PASS=section_counts.get("PASS", 0),
-                FAIL=section_counts.get("FAIL", 0),
-                WARNING=section_counts.get("WARNING", 0),
-                NOT_AVAILABLE=section_counts.get("NOT_AVAILABLE", 0),
-                SKIPPED=section_counts.get("SKIPPED", 0),
-                ERROR=section_counts.get("ERROR", 0),
-            )
+        lines.extend(
+            [
+                f"### {layer_name}",
+                "",
+                (
+                    f"Layer counts: PASS={section_counts.get('PASS', 0)}, "
+                    f"FAIL={section_counts.get('FAIL', 0)}, "
+                    f"WARNING={section_counts.get('WARNING', 0)}, "
+                    f"NOT_AVAILABLE={section_counts.get('NOT_AVAILABLE', 0)}, "
+                    f"SKIPPED={section_counts.get('SKIPPED', 0)}, "
+                    f"ERROR={section_counts.get('ERROR', 0)}"
+                ),
+                "",
+            ]
         )
-        lines.append("| X | V | Test ID                  | Status        | Language     | Test Name                                     |")
-        lines.append("|---|---|--------------------------|---------------|--------------|-----------------------------------------------|")
 
         for record in layer_records:
-            test_id = str(record.get("test_id", ""))[:24]
-            status_text = str(record.get("status", ""))[:13]
-            language = str(record.get("language", ""))[:12]
-            test_name = str(record.get("test_name", ""))[:45]
-            x_mark, v_mark = status_xor_marks(str(record.get("status", "")))
-            row = (
-                f"| {x_mark:^1} | {v_mark:^1} | {test_id:<24} | {status_text:<13} | "
-                f"{language:<12} | {test_name:<45} |"
+            lines.append(
+                f"- **{record.get('status', '')}** `{record.get('test_id', '')}`: "
+                f"{record.get('test_name', '')}"
             )
-            lines.append(row)
-
-            output_file = str(record.get("output_file", "")).strip()
-            if output_file:
-                for chunk in wrap_pdf_text(f"  output: {output_file}", width=114):
-                    lines.append(chunk)
+            lines.append(f"  - Language: {record.get('language', '')}")
+            lines.append(f"  - Expected: {record.get('expected_result', '')}")
             actual_result = str(record.get("actual_result", "")).strip()
             if actual_result:
-                for chunk in wrap_pdf_text(f"  actual: {actual_result}", width=114):
-                    lines.append(chunk)
+                lines.append(f"  - Actual: {actual_result}")
+            output_file = str(record.get("output_file", "")).strip()
+            if output_file:
+                lines.append(f"  - Output: `{output_file}`")
             error_message = str(record.get("error_message", "")).strip()
             if error_message:
-                for chunk in wrap_pdf_text(f"  error: {error_message}", width=114):
-                    lines.append(chunk)
+                lines.append(f"  - Error: {error_message}")
+            lines.append("")
 
-    return lines
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_markdown_report(report_file: Path, markdown_text: str) -> None:
+    report_file.parent.mkdir(parents=True, exist_ok=True)
+    report_file.write_text(markdown_text, encoding="utf-8")
 
 
 def write_text_pdf(report_file: Path, lines: list[str]) -> None:
@@ -900,8 +1002,10 @@ def write_text_pdf(report_file: Path, lines: list[str]) -> None:
     report_file.write_bytes(bytes(output))
 
 
-def generate_pdf_report(report_file: Path, run_timestamp: str, status: str, inventory: dict, records: list[dict]) -> None:
-    lines = build_pdf_report_lines(run_timestamp, status, inventory, records)
+def generate_pdf_report(report_file: Path, markdown_text: str) -> None:
+    lines: list[str] = []
+    for line in markdown_text.splitlines():
+        lines.extend(wrap_pdf_text(line, width=96))
     write_text_pdf(report_file, lines)
 
 
@@ -997,6 +1101,7 @@ def write_final_reports(
     csv_report = ROOT / "reports" / "uat_validation_report.csv"
     json_report = ROOT / "reports" / "uat_validation_report.json"
     html_report = ROOT / "reports" / "uat_validation_report.html"
+    markdown_report = ROOT / "reports" / "uat_validation_report.md"
     pdf_report = ROOT / "reports" / "uat_validation_report.pdf"
     manifest_report = ROOT / "reports" / "run_manifest.json"
 
@@ -1017,7 +1122,9 @@ def write_final_reports(
         },
     )
     generate_html_report(html_report, run_timestamp, status, inventory, records, package_rows, clinical_rows, document_rows)
-    generate_pdf_report(pdf_report, run_timestamp, status, inventory, records)
+    markdown_text = build_markdown_report(run_timestamp, status, inventory, records)
+    write_markdown_report(markdown_report, markdown_text)
+    generate_pdf_report(pdf_report, markdown_text)
 
     report_files = [
         ROOT / "reports" / "environment_report.txt",
@@ -1026,6 +1133,7 @@ def write_final_reports(
         csv_report,
         json_report,
         html_report,
+        markdown_report,
         pdf_report,
     ]
     details = []
@@ -1079,7 +1187,10 @@ def add_file_evidence_record(records: list[dict], test_id: str, layer: str, lang
 def skip_r_records(records: list[dict], required_r_tests: bool) -> None:
     status = "FAIL" if required_r_tests else "SKIPPED"
     expected = "Rscript is available for required R tests." if required_r_tests else "R tests skipped when R is unavailable."
-    actual = "Rscript was not found via SCE_UAT_RSCRIPT or on the system path."
+    actual = (
+        "Rscript was not found via SCE_UAT_RSCRIPT, PATH, R_HOME, RStudio environment, "
+        "Windows registry, or environment-based R installation folders."
+    )
     r_tests = [
         ("r_smoke", "Layer 1", "R smoke test"),
         ("r_io", "Layer 2", "R file I/O test"),
@@ -1155,9 +1266,17 @@ def run_uat() -> tuple[str, list[dict]]:
             language="R",
             test_name="Rscript detection",
             status=r_detection_status,
-            expected_result="Rscript is discoverable via SCE_UAT_RSCRIPT or through the system path.",
+            expected_result=(
+                "Rscript is discoverable via SCE_UAT_RSCRIPT, PATH, R_HOME, RStudio environment, "
+                "Windows registry, or environment-based R installation folders."
+            ),
             actual_result=rscript_path or "Rscript was not found.",
-            error_message="" if rscript_path else "Rscript was not found via SCE_UAT_RSCRIPT or on the system path.",
+            error_message=""
+            if rscript_path
+            else (
+                "Rscript was not found via SCE_UAT_RSCRIPT, PATH, R_HOME, RStudio environment, "
+                "Windows registry, or environment-based R installation folders."
+            ),
         )
     )
 
@@ -1402,6 +1521,7 @@ def run_uat() -> tuple[str, list[dict]]:
         ROOT / "reports" / "uat_validation_report.csv",
         ROOT / "reports" / "uat_validation_report.json",
         ROOT / "reports" / "uat_validation_report.html",
+        ROOT / "reports" / "uat_validation_report.md",
         ROOT / "reports" / "uat_validation_report.pdf",
         ROOT / "reports" / "run_manifest.json",
     ]
@@ -1412,7 +1532,7 @@ def run_uat() -> tuple[str, list[dict]]:
             "Python",
             "Final UAT report generation",
             "PASS",
-            "Final CSV, JSON, HTML, PDF, and manifest reports generated.",
+            "Final CSV, JSON, HTML, Markdown, PDF, and manifest reports generated.",
             "Final report generation completed.",
             output_file="; ".join(safe_rel(path) for path in final_report_files),
         )
@@ -1491,13 +1611,9 @@ def write_emergency_error_report(exc: Exception) -> None:
         [],
         [],
     )
-    generate_pdf_report(
-        ROOT / "reports" / "uat_validation_report.pdf",
-        now_iso(),
-        "ERROR",
-        inventory,
-        [error_record],
-    )
+    markdown_text = build_markdown_report(now_iso(), "ERROR", inventory, [error_record])
+    write_markdown_report(ROOT / "reports" / "uat_validation_report.md", markdown_text)
+    generate_pdf_report(ROOT / "reports" / "uat_validation_report.pdf", markdown_text)
     write_json(
         ROOT / "reports" / "run_manifest.json",
         {
@@ -1513,6 +1629,7 @@ def write_emergency_error_report(exc: Exception) -> None:
                 "reports/uat_validation_report.csv",
                 "reports/uat_validation_report.json",
                 "reports/uat_validation_report.html",
+                "reports/uat_validation_report.md",
                 "reports/uat_validation_report.pdf",
                 "reports/run_manifest.json",
             ],
@@ -1534,6 +1651,7 @@ def print_summary(status: str, records: list[dict]) -> None:
     print(f"- {ROOT / 'reports' / 'uat_validation_report.csv'}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.json'}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.html'}")
+    print(f"- {ROOT / 'reports' / 'uat_validation_report.md'}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.pdf'}")
     print(f"- {ROOT / 'reports' / 'run_manifest.json'}")
 

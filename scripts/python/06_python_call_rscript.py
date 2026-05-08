@@ -3,6 +3,7 @@ from pathlib import Path
 import csv
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -22,13 +23,112 @@ def read_metric_csv(path, value_column):
         return {row["metric"]: row[value_column] for row in csv.DictReader(handle)}
 
 
+def valid_rscript_path(candidate):
+    if not candidate:
+        return None
+    path = Path(candidate).expanduser()
+    if path.is_file():
+        return str(path.resolve())
+    return None
+
+
+def rscript_candidates_from_r_executable(r_executable):
+    if not r_executable:
+        return []
+    r_path = Path(r_executable).expanduser()
+    candidates = [r_path.parent / "Rscript.exe", r_path.parent / "Rscript"]
+    if r_path.name.lower() in {"r.exe", "r"}:
+        candidates.extend([r_path.with_name("Rscript.exe"), r_path.with_name("Rscript")])
+    return candidates
+
+
+def windows_registry_rscript_candidates():
+    if platform.system().lower() != "windows":
+        return []
+    candidates = []
+    try:
+        import winreg
+    except Exception:
+        return candidates
+    registry_roots = [winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE]
+    registry_keys = [
+        r"Software\R-core\R",
+        r"Software\R-core\R64",
+        r"Software\WOW6432Node\R-core\R",
+        r"Software\WOW6432Node\R-core\R64",
+    ]
+    for root_key in registry_roots:
+        for key_name in registry_keys:
+            try:
+                with winreg.OpenKey(root_key, key_name) as key:
+                    install_path, _ = winreg.QueryValueEx(key, "InstallPath")
+                    if install_path:
+                        install_root = Path(str(install_path))
+                        candidates.extend(
+                            [
+                                install_root / "bin" / "Rscript.exe",
+                                install_root / "bin" / "x64" / "Rscript.exe",
+                                install_root / "bin" / "i386" / "Rscript.exe",
+                            ]
+                        )
+            except OSError:
+                continue
+    return candidates
+
+
+def windows_env_rscript_candidates():
+    if platform.system().lower() != "windows":
+        return []
+    candidates = []
+    for env_name in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        base_value = os.environ.get(env_name, "").strip()
+        if not base_value:
+            continue
+        base_path = Path(base_value)
+        search_roots = [base_path / "R"]
+        if env_name == "LOCALAPPDATA":
+            search_roots.append(base_path / "Programs" / "R")
+        for search_root in search_roots:
+            if not search_root.exists():
+                continue
+            for child in search_root.glob("R-*"):
+                candidates.extend(
+                    [
+                        child / "bin" / "Rscript.exe",
+                        child / "bin" / "x64" / "Rscript.exe",
+                        child / "bin" / "i386" / "Rscript.exe",
+                    ]
+                )
+    return candidates
+
+
 def discover_rscript():
+    candidates = []
     configured_rscript = os.environ.get("SCE_UAT_RSCRIPT", "").strip()
-    if configured_rscript:
-        configured_path = Path(configured_rscript).expanduser()
-        if configured_path.is_file():
-            return str(configured_path.resolve())
-    return shutil.which("Rscript")
+    candidates.append(configured_rscript or None)
+    candidates.append(shutil.which("Rscript"))
+
+    r_home = os.environ.get("R_HOME", "").strip()
+    if r_home:
+        r_home_path = Path(r_home)
+        candidates.extend([r_home_path / "bin" / "Rscript.exe", r_home_path / "bin" / "Rscript"])
+
+    candidates.extend(rscript_candidates_from_r_executable(os.environ.get("RSTUDIO_WHICH_R", "").strip()))
+    candidates.extend(windows_registry_rscript_candidates())
+    candidates.extend(windows_env_rscript_candidates())
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        candidate_key = str(candidate)
+        if candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        valid = valid_rscript_path(candidate)
+        if valid:
+            return valid
+    return None
 
 
 def main():
@@ -56,9 +156,12 @@ def main():
 
     if not rscript_path:
         result["status"] = "FAIL"
-        result["stderr"] = "Rscript was not found via SCE_UAT_RSCRIPT or on the system path."
+        result["stderr"] = (
+            "Rscript was not found via SCE_UAT_RSCRIPT, PATH, R_HOME, RStudio environment, "
+            "Windows registry, or environment-based R installation folders."
+        )
         result_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
-        print("Rscript was not found via SCE_UAT_RSCRIPT or on the system path.", file=sys.stderr)
+        print(result["stderr"], file=sys.stderr)
         return 1
 
     completed = subprocess.run(

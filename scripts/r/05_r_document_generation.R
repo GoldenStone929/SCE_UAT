@@ -26,11 +26,27 @@ file_ok <- function(path) {
 }
 
 main <- function() {
-  output_dir <- file.path(ROOT, "outputs", "generated_documents")
+  output_dir <- file.path(ROOT, "outputs", "r", "generated_documents")
   result_file <- file.path(ROOT, "outputs", "test_results", "r_document_generation_results.csv")
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
   dir.create(dirname(result_file), recursive = TRUE, showWarnings = FALSE)
   timestamp <- format(Sys.time(), "%Y-%m-%dT%H:%M:%S")
+  markdown_lines <- c(
+    "# R Document Generation Test",
+    "",
+    paste("- Timestamp:", timestamp),
+    "- Status: PASS",
+    "- Runtime: R",
+    "- Purpose: verify that the SCE can create readable R-generated output artifacts.",
+    "",
+    "## Generated Baseline Formats",
+    "",
+    "- TXT",
+    "- CSV",
+    "- HTML",
+    "- Markdown",
+    ""
+  )
   results <- data.frame(
     language = character(),
     output_type = character(),
@@ -82,6 +98,17 @@ main <- function() {
     }
   )
 
+  path <- file.path(output_dir, "r_document_test.md")
+  tryCatch(
+    {
+      writeLines(markdown_lines, path)
+      results <- add_result(results, "MARKDOWN", path, ifelse(file_ok(path), "PASS", "FAIL"), "base")
+    },
+    error = function(e) {
+      results <<- add_result(results, "MARKDOWN", "", "ERROR", "base", conditionMessage(e))
+    }
+  )
+
   if (requireNamespace("openxlsx", quietly = TRUE)) {
     path <- file.path(output_dir, "r_document_test.xlsx")
     tryCatch(
@@ -121,10 +148,25 @@ main <- function() {
   path <- file.path(output_dir, "r_document_test.pdf")
   tryCatch(
     {
-      grDevices::pdf(path)
+      grDevices::pdf(path, width = 8.5, height = 11)
+      par(mar = c(1, 1, 1, 1))
       plot.new()
-      title("R Document Test")
-      text(0.5, 0.5, paste("Timestamp:", timestamp))
+      title("R Document Generation Test")
+      y <- 0.92
+      for (line in markdown_lines[3:length(markdown_lines)]) {
+        wrapped <- strwrap(line, width = 88)
+        if (length(wrapped) == 0) {
+          wrapped <- ""
+        }
+        for (text_line in wrapped) {
+          text(0.05, y, text_line, adj = c(0, 1), cex = 0.82, family = "mono")
+          y <- y - 0.045
+          if (y < 0.08) {
+            plot.new()
+            y <- 0.92
+          }
+        }
+      }
       grDevices::dev.off()
       results <- add_result(results, "PDF", path, ifelse(file_ok(path), "PASS", "FAIL"), "base_pdf")
     },
@@ -164,7 +206,7 @@ main <- function() {
   }
 
   write.csv(results, result_file, row.names = FALSE, na = "")
-  baseline <- results$status[results$output_type %in% c("TXT", "CSV", "HTML")]
+  baseline <- results$status[results$output_type %in% c("TXT", "CSV", "HTML", "MARKDOWN")]
   message("R document generation results written to ", result_file)
   if (!all(baseline == "PASS")) {
     quit(status = 1)

@@ -25,7 +25,6 @@ The package writes only within its own `outputs/` and `reports/` folders and doe
 SCE_UAT_R_Python_Test_Package/
   run_uat.py
   run_uat_windows.bat
-  run_uat_ssh.bat
   README.md
   PDF_GENERATION_README.md
   config.json
@@ -44,8 +43,9 @@ SCE_UAT_R_Python_Test_Package/
     r/
   outputs/
     python/
+      generated_documents/
     r/
-    generated_documents/
+      generated_documents/
     logs/
     test_results/
   reports/
@@ -95,30 +95,6 @@ The helper launcher only starts the root-level `run_uat.py`. The audited runner 
 
 The root-level launcher derives the package root from its own location and then runs all tests using relative paths.
 
-## Remote SSH / Headless Execution
-
-For remote SSH sessions, headless job runners, and CI-style execution, use one of:
-
-```cmd
-python run_uat.py
-```
-
-or:
-
-```cmd
-run_uat_ssh.bat
-```
-
-`run_uat_ssh.bat` is non-interactive: it does not use `pause` and returns the same exit code as `run_uat.py`, so automation can reliably detect pass/fail outcomes.
-
-`run_uat_windows.bat` is kept for interactive double-click usage and intentionally pauses before closing so users can read console output.
-
-For every root-level run, `run_uat.py` also generates a final all-in-one PDF report:
-
-- path: `reports/uat_validation_report.pdf`
-- content: all recorded UAT tests grouped by section (`Layer 0` through `Layer 7`)
-- table format: XOR marks in each row (`V` for PASS, `X` for non-PASS)
-
 Required filesystem permissions for successful startup and execution:
 
 - create, write, read, append, and delete under `outputs/`;
@@ -126,8 +102,8 @@ Required filesystem permissions for successful startup and execution:
 
 R runtime requirement for headless and interactive runs:
 
-- `Rscript` must be available on `PATH`, or
-- set `SCE_UAT_RSCRIPT` to an explicit `Rscript` executable path.
+- `Rscript` should be available through Windows PATH, R installation registration, or R-related environment values; or
+- set `SCE_UAT_RSCRIPT` to an explicit `Rscript.exe` executable path.
 
 This package does not install Python, R, or Python/R packages.
 
@@ -135,8 +111,9 @@ This package does not install Python, R, or Python/R packages.
 
 Final reports are written to `reports/`:
 
-- `uat_validation_report.pdf`: final all-in-one reviewer report grouped by UAT section with XOR row marks (`V`/`X`).
 - `uat_validation_report.html`: recommended first review artifact.
+- `uat_validation_report.md`: readable Markdown reviewer summary.
+- `uat_validation_report.pdf`: readable PDF-style reviewer summary generated from Markdown text.
 - `uat_validation_report.csv`: detailed test-result table.
 - `uat_validation_report.json`: machine-readable detailed report.
 - `environment_report.txt`: Python, R, system, and runtime inventory.
@@ -148,9 +125,8 @@ Detailed evidence, logs, and generated test files are written under `outputs/`:
 
 - `outputs/logs/`: stdout/stderr logs for executed scripts.
 - `outputs/test_results/`: validation JSON/CSV evidence.
-- `outputs/python/`: Python-generated test outputs.
-- `outputs/r/`: R-generated test outputs.
-- `outputs/generated_documents/`: generated baseline TXT, CSV, JSON, and HTML files, plus optional Excel, Word, and PDF outputs when supported by available packages.
+- `outputs/python/`: Python-generated test outputs, including readable Python document outputs under `outputs/python/generated_documents/`.
+- `outputs/r/`: R-generated test outputs, including readable R document outputs under `outputs/r/generated_documents/`.
 
 Each run refreshes generated artifacts under `outputs/` and `reports/` before creating new evidence, so reports reflect the latest execution.
 
@@ -219,7 +195,7 @@ Portability constraints:
 - No local username, home folder, network path, or drive letter is required.
 - `run_uat.py` derives the root from `Path(__file__).resolve().parent`.
 - Python child scripts are launched using `sys.executable`.
-- Rscript is discovered using `SCE_UAT_RSCRIPT` when set to a valid file path, otherwise `shutil.which("Rscript")`.
+- Rscript discovery starts with `SCE_UAT_RSCRIPT` and `shutil.which("Rscript")`, then checks Windows-friendly sources such as `R_HOME`, RStudio's R executable environment, Windows R registry entries, and environment-based R installation folders.
 - Rscript paths are not hardcoded.
 - Python subprocess calls use list arguments rather than shell command strings to avoid Windows path and space issues.
 - All input, output, report, log, and script paths are resolved relative to the package root.
@@ -243,7 +219,7 @@ Default configuration:
 }
 ```
 
-If `required_r_tests` is `true` and `Rscript` is not available through `SCE_UAT_RSCRIPT` or `PATH`, the overall result is `FAIL`. If `required_r_tests` is changed to `false`, unavailable R tests are reported as skipped or warnings.
+If `required_r_tests` is `true` and `Rscript` is not discoverable through the supported Windows R discovery methods, the overall result is `FAIL`. If `required_r_tests` is changed to `false`, unavailable R tests are reported as skipped or warnings.
 
 ## 13. Troubleshooting
 
@@ -255,7 +231,8 @@ If Python does not start:
 
 If R tests fail:
 
-- Confirm `Rscript` is available on the system path, or set `SCE_UAT_RSCRIPT` to the `Rscript` executable.
+- Confirm `Rscript` is available to the Windows Server 2019 session.
+- If R works in RStudio but `Rscript` is not on the Windows PATH, set `SCE_UAT_RSCRIPT` to the full `Rscript.exe` path before running, or confirm the R installation is registered in Windows.
 - Review `reports/environment_report.txt`.
 - Review R logs under `outputs/logs/`.
 
@@ -279,13 +256,13 @@ If a clinical validation fails:
 Start with:
 
 ```text
-reports/uat_validation_report.pdf
+reports/uat_validation_report.html
 ```
 
 Then review:
 
 ```text
-reports/uat_validation_report.html
+reports/uat_validation_report.md
 ```
 
 Recommended review order:
@@ -302,8 +279,9 @@ Recommended review order:
 Before accepting the UAT evidence, confirm:
 
 - The package was run from the package root on Windows Server 2019.
-- The run used `python run_uat.py`, `py run_uat.py`, `run_uat_ssh.bat`, or `run_uat_windows.bat`.
+- The run used `python run_uat.py`, `py run_uat.py`, or `run_uat_windows.bat`.
 - `reports/uat_validation_report.pdf` exists and opens.
+- `reports/uat_validation_report.md` exists and is readable.
 - `reports/uat_validation_report.html` exists and opens.
 - `reports/uat_validation_report.csv` exists and contains detailed test rows.
 - `reports/uat_validation_report.json` exists and is machine-readable.
@@ -330,16 +308,11 @@ or:
 py run_uat.py
 ```
 
-or:
-
-```cmd
-run_uat_ssh.bat
-```
-
 Then confirm that `reports/` contains:
 
-- `uat_validation_report.pdf`
 - `uat_validation_report.html`
+- `uat_validation_report.md`
+- `uat_validation_report.pdf`
 - `uat_validation_report.csv`
 - `uat_validation_report.json`
 - `run_manifest.json`
@@ -365,12 +338,6 @@ or:
 py run_uat.py
 ```
 
-or:
-
-```cmd
-run_uat_ssh.bat
-```
-
 The runner recreates the required `outputs/` and `reports/` folders automatically.
 
 ## 18. Preparation workspace verification result
@@ -381,7 +348,7 @@ Observed result:
 
 ```text
 Overall status: PASS_WITH_WARNINGS
-PASS: 30
+PASS: 32
 FAIL: 0
 WARNING: 0
 NOT_AVAILABLE: 22
@@ -399,15 +366,15 @@ Verified implementation points:
 
 - `run_uat.py` derives `ROOT` using `Path(__file__).resolve().parent`.
 - Python child scripts are launched using `sys.executable`.
-- Rscript is detected using `SCE_UAT_RSCRIPT` (when valid) or `shutil.which("Rscript")`.
+- Rscript discovery starts with `SCE_UAT_RSCRIPT` and `shutil.which("Rscript")`, then checks Windows-friendly R sources such as `R_HOME`, RStudio environment values, Windows registry entries, and environment-based R installation folders.
 - Python subprocess calls use list arguments rather than shell command strings.
 - `run_uat_windows.bat` uses `cd /d "%~dp0"` and is designed to support package folders with spaces in the path.
-- `run_uat_ssh.bat` is headless-safe (no pause) and returns the UAT exit code.
 - Optional missing packages are reported as `NOT_AVAILABLE`, not `FAIL`.
 - With `required_r_tests=true`, missing Rscript is treated as a required failure.
-- Final reports are generated under `reports/`, including `uat_validation_report.pdf`.
-- The final PDF groups all recorded tests by UAT section and uses XOR row marks (`V`/`X`).
+- Final reports are generated under `reports/`, including readable HTML, Markdown, and PDF summaries.
 - Runtime logs and test evidence are generated under `outputs/`.
+- Python generated documents are written under `outputs/python/generated_documents/`.
+- R generated documents are written under `outputs/r/generated_documents/`.
 - No package installation commands are included.
 - No fixed drive letters, usernames, network paths, or hardcoded Rscript paths are required.
 
@@ -415,7 +382,7 @@ Preparation-workspace verification produced:
 
 ```text
 Overall status: PASS_WITH_WARNINGS
-PASS: 30
+PASS: 32
 FAIL: 0
 WARNING: 0
 NOT_AVAILABLE: 22

@@ -5,6 +5,7 @@ import html
 import importlib.util
 import json
 import sys
+import textwrap
 
 
 def get_root():
@@ -39,12 +40,31 @@ def optional_available(module_name):
 
 def main():
     root = get_root()
-    output_dir = root / "outputs" / "generated_documents"
+    output_dir = root / "outputs" / "python" / "generated_documents"
     result_file = root / "outputs" / "test_results" / "python_document_generation_results.csv"
     output_dir.mkdir(parents=True, exist_ok=True)
     result_file.parent.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().isoformat(timespec="seconds")
     rows = []
+    markdown_content = "\n".join(
+        [
+            "# Python Document Generation Test",
+            "",
+            f"- Timestamp: {timestamp}",
+            "- Status: PASS",
+            "- Runtime: Python",
+            "- Purpose: verify that the SCE can create readable Python-generated output artifacts.",
+            "",
+            "## Generated Baseline Formats",
+            "",
+            "- TXT",
+            "- CSV",
+            "- JSON",
+            "- HTML",
+            "- Markdown",
+            "",
+        ]
+    )
 
     try:
         path = output_dir / "python_document_test.txt"
@@ -84,6 +104,13 @@ def main():
         add_result(rows, "HTML", path, "PASS" if file_ok(path) else "FAIL", "standard_library")
     except Exception as exc:
         add_result(rows, "HTML", "", "ERROR", "standard_library", str(exc))
+
+    try:
+        path = output_dir / "python_document_test.md"
+        path.write_text(markdown_content, encoding="utf-8")
+        add_result(rows, "MARKDOWN", path, "PASS" if file_ok(path) else "FAIL", "standard_library")
+    except Exception as exc:
+        add_result(rows, "MARKDOWN", "", "ERROR", "standard_library", str(exc))
 
     if optional_available("openpyxl"):
         try:
@@ -126,9 +153,20 @@ def main():
 
             path = output_dir / "python_document_test.pdf"
             pdf = canvas.Canvas(str(path), pagesize=letter)
-            pdf.drawString(72, 720, "Python Document Test")
-            pdf.drawString(72, 700, f"Timestamp: {timestamp}")
-            pdf.drawString(72, 680, "Status: PASS")
+            y_position = 735
+            pdf.setTitle("Python Document Generation Test")
+            pdf.setFont("Helvetica-Bold", 14)
+            pdf.drawString(72, y_position, "Python Document Generation Test")
+            y_position -= 28
+            pdf.setFont("Helvetica", 10)
+            for raw_line in markdown_content.splitlines()[2:]:
+                for line in textwrap.wrap(raw_line, width=88) or [""]:
+                    if y_position < 72:
+                        pdf.showPage()
+                        pdf.setFont("Helvetica", 10)
+                        y_position = 735
+                    pdf.drawString(72, y_position, line)
+                    y_position -= 14
             pdf.save()
             add_result(rows, "PDF", path, "PASS" if file_ok(path) else "FAIL", "reportlab")
         except Exception as exc:
@@ -144,7 +182,9 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
 
-    baseline_statuses = [row["status"] for row in rows if row["output_type"] in {"TXT", "CSV", "JSON", "HTML"}]
+    baseline_statuses = [
+        row["status"] for row in rows if row["output_type"] in {"TXT", "CSV", "JSON", "HTML", "MARKDOWN"}
+    ]
     print(f"Python document generation results written to {result_file}")
     return 0 if all(status == "PASS" for status in baseline_statuses) else 1
 

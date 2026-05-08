@@ -180,7 +180,7 @@ Layer 4 proves that Python can orchestrate R inside the same SCE folder.
 The test:
 
 - runs `scripts/python/06_python_call_rscript.py`
-- detects `Rscript` using `SCE_UAT_RSCRIPT` (when set to a valid file path) or the system path
+- detects `Rscript` using `SCE_UAT_RSCRIPT`, the system path, `R_HOME`, RStudio environment values, Windows registry entries, or environment-based R installation folders
 - calls `scripts/r/04_r_clinical_summary.R`
 - passes the project root to R
 - verifies that R creates `outputs/r/ae_summary_from_r.csv`
@@ -270,7 +270,8 @@ Primary evidence:
 
 - `outputs/test_results/python_document_generation_results.csv`
 - `outputs/test_results/r_document_generation_results.csv`
-- generated files under `outputs/generated_documents/`
+- Python generated files under `outputs/python/generated_documents/`
+- R generated files under `outputs/r/generated_documents/`
 
 ### Layer 7: Final UAT report generation
 
@@ -279,6 +280,7 @@ Layer 7 consolidates all test evidence into final reports.
 Final reports:
 
 - `reports/uat_validation_report.pdf`
+- `reports/uat_validation_report.md`
 - `reports/uat_validation_report.html`
 - `reports/uat_validation_report.csv`
 - `reports/uat_validation_report.json`
@@ -316,7 +318,7 @@ The PDF should clearly state:
 - The package does not rely on fixed folders, drive letters, usernames, or network paths.
 - The root is detected from `run_uat.py`.
 - Python child scripts are launched using the active Python interpreter.
-- Rscript is discovered from `SCE_UAT_RSCRIPT` (if valid) or the system path.
+- Rscript discovery starts with `SCE_UAT_RSCRIPT` and the system path, then checks Windows-friendly R discovery sources such as `R_HOME`, RStudio environment values, Windows registry entries, and environment-based R installation folders.
 - Rscript paths are not hardcoded.
 - The package does not install Python or R packages.
 
@@ -404,7 +406,7 @@ Source material:
 | R clinical validation | `outputs/test_results/r_clinical_validation.csv` |
 | Python-to-R orchestration | `outputs/test_results/python_calls_r_validation.json` |
 | Document generation | `outputs/test_results/python_document_generation_results.csv`, `outputs/test_results/r_document_generation_results.csv` |
-| Final UAT report | `reports/uat_validation_report.pdf`, `reports/uat_validation_report.html`, `reports/uat_validation_report.csv`, `reports/uat_validation_report.json` |
+| Final UAT report | `reports/uat_validation_report.html`, `reports/uat_validation_report.md`, `reports/uat_validation_report.pdf`, `reports/uat_validation_report.csv`, `reports/uat_validation_report.json` |
 | Run manifest | `reports/run_manifest.json` |
 
 ## Reviewer checklist for the PDF
@@ -414,6 +416,7 @@ Include this checklist:
 - Confirm the package was run from the package root.
 - Confirm the target environment is Windows Server 2019 or the intended SCE.
 - Confirm `reports/uat_validation_report.pdf` exists and opens.
+- Confirm `reports/uat_validation_report.md` exists and is readable.
 - Confirm `reports/uat_validation_report.html` exists and opens.
 - Confirm required tests have no `FAIL` or `ERROR` status.
 - Confirm optional missing packages are shown as `NOT_AVAILABLE`.
