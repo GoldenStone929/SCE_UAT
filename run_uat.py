@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+import textwrap
 import traceback
 
 
@@ -709,6 +710,201 @@ def html_table(rows: list[dict], columns: list[str]) -> str:
     return f"<table><thead><tr>{header}</tr></thead><tbody>{''.join(body_rows)}</tbody></table>"
 
 
+def layer_sort_key(layer_name: str) -> tuple[int, str]:
+    if layer_name.startswith("Layer "):
+        suffix = layer_name.split(" ", 1)[1]
+        numeric_part = "".join(char for char in suffix if char.isdigit())
+        if numeric_part:
+            return int(numeric_part), layer_name
+    return 999, layer_name
+
+
+def status_xor_marks(status: str) -> tuple[str, str]:
+    return ("", "V") if status == "PASS" else ("X", "")
+
+
+def grouped_records_by_layer(records: list[dict]) -> list[tuple[str, list[dict]]]:
+    grouped: dict[str, list[dict]] = {}
+    for record in records:
+        layer = str(record.get("layer", "Uncategorized")) or "Uncategorized"
+        grouped.setdefault(layer, []).append(record)
+    output: list[tuple[str, list[dict]]] = []
+    for layer in sorted(grouped.keys(), key=layer_sort_key):
+        ordered_records = sorted(grouped[layer], key=lambda item: str(item.get("test_id", "")))
+        output.append((layer, ordered_records))
+    return output
+
+
+def wrap_pdf_text(text: str, width: int = 116) -> list[str]:
+    cleaned = str(text).replace("\r\n", "\n").replace("\r", "\n")
+    wrapped: list[str] = []
+    for raw_line in cleaned.split("\n"):
+        chunks = textwrap.wrap(
+            raw_line,
+            width=width,
+            break_long_words=True,
+            break_on_hyphens=False,
+        )
+        wrapped.extend(chunks or [""])
+    return wrapped
+
+
+def pdf_safe_text(text: str) -> str:
+    latin_text = str(text).encode("latin-1", "replace").decode("latin-1")
+    return latin_text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def build_pdf_report_lines(run_timestamp: str, status: str, inventory: dict, records: list[dict]) -> list[str]:
+    counts = count_statuses(records)
+    lines = [
+        "SCE UAT Validation Final All-in-One Report",
+        "Target environment: Windows-based SCE (Windows Server 2019 primary).",
+        f"Run timestamp: {run_timestamp}",
+        f"Overall status: {status}",
+        f"Project root: {inventory.get('python', {}).get('project_root', str(ROOT))}",
+        "Root runner: run_uat.py",
+        "",
+        "Overall status counts:",
+        (
+            "PASS={PASS} FAIL={FAIL} WARNING={WARNING} NOT_AVAILABLE={NOT_AVAILABLE} "
+            "SKIPPED={SKIPPED} ERROR={ERROR}"
+        ).format(
+            PASS=counts.get("PASS", 0),
+            FAIL=counts.get("FAIL", 0),
+            WARNING=counts.get("WARNING", 0),
+            NOT_AVAILABLE=counts.get("NOT_AVAILABLE", 0),
+            SKIPPED=counts.get("SKIPPED", 0),
+            ERROR=counts.get("ERROR", 0),
+        ),
+        "",
+        "Section table XOR rule: each row is marked either X or V (PASS -> V, non-PASS -> X).",
+    ]
+
+    for layer_name, layer_records in grouped_records_by_layer(records):
+        section_counts = count_statuses(layer_records)
+        lines.append("")
+        lines.append(f"Section: {layer_name}")
+        lines.append(
+            (
+                "Section counts: PASS={PASS} FAIL={FAIL} WARNING={WARNING} "
+                "NOT_AVAILABLE={NOT_AVAILABLE} SKIPPED={SKIPPED} ERROR={ERROR}"
+            ).format(
+                PASS=section_counts.get("PASS", 0),
+                FAIL=section_counts.get("FAIL", 0),
+                WARNING=section_counts.get("WARNING", 0),
+                NOT_AVAILABLE=section_counts.get("NOT_AVAILABLE", 0),
+                SKIPPED=section_counts.get("SKIPPED", 0),
+                ERROR=section_counts.get("ERROR", 0),
+            )
+        )
+        lines.append("| X | V | Test ID                  | Status        | Language     | Test Name                                     |")
+        lines.append("|---|---|--------------------------|---------------|--------------|-----------------------------------------------|")
+
+        for record in layer_records:
+            test_id = str(record.get("test_id", ""))[:24]
+            status_text = str(record.get("status", ""))[:13]
+            language = str(record.get("language", ""))[:12]
+            test_name = str(record.get("test_name", ""))[:45]
+            x_mark, v_mark = status_xor_marks(str(record.get("status", "")))
+            row = (
+                f"| {x_mark:^1} | {v_mark:^1} | {test_id:<24} | {status_text:<13} | "
+                f"{language:<12} | {test_name:<45} |"
+            )
+            lines.append(row)
+
+            output_file = str(record.get("output_file", "")).strip()
+            if output_file:
+                for chunk in wrap_pdf_text(f"  output: {output_file}", width=114):
+                    lines.append(chunk)
+            actual_result = str(record.get("actual_result", "")).strip()
+            if actual_result:
+                for chunk in wrap_pdf_text(f"  actual: {actual_result}", width=114):
+                    lines.append(chunk)
+            error_message = str(record.get("error_message", "")).strip()
+            if error_message:
+                for chunk in wrap_pdf_text(f"  error: {error_message}", width=114):
+                    lines.append(chunk)
+
+    return lines
+
+
+def write_text_pdf(report_file: Path, lines: list[str]) -> None:
+    report_file.parent.mkdir(parents=True, exist_ok=True)
+
+    page_width = 612
+    page_height = 792
+    margin_left = 40
+    start_y = 760
+    font_size = 9
+    line_height = 12
+    lines_per_page = 58
+
+    if not lines:
+        lines = [""]
+    pages = [lines[index : index + lines_per_page] for index in range(0, len(lines), lines_per_page)]
+
+    objects: dict[int, bytes] = {}
+    objects[1] = b"<< /Type /Catalog /Pages 2 0 R >>"
+    objects[3] = b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+
+    page_ids: list[int] = []
+    first_page_object_id = 4
+    for page_index, page_lines in enumerate(pages):
+        page_obj_id = first_page_object_id + page_index * 2
+        content_obj_id = page_obj_id + 1
+        page_ids.append(page_obj_id)
+
+        content_commands = [
+            "BT",
+            f"/F1 {font_size} Tf",
+            f"{line_height} TL",
+            f"{margin_left} {start_y} Td",
+        ]
+        for line in page_lines:
+            content_commands.append(f"({pdf_safe_text(line)}) Tj")
+            content_commands.append("T*")
+        content_commands.append("ET")
+        stream_data = "\n".join(content_commands).encode("latin-1", "replace")
+
+        objects[page_obj_id] = (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {page_width} {page_height}] "
+            f"/Resources << /Font << /F1 3 0 R >> >> /Contents {content_obj_id} 0 R >>"
+        ).encode("ascii")
+        objects[content_obj_id] = (
+            b"<< /Length "
+            + str(len(stream_data)).encode("ascii")
+            + b" >>\nstream\n"
+            + stream_data
+            + b"\nendstream"
+        )
+
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects[2] = f"<< /Type /Pages /Kids [{kids}] /Count {len(page_ids)} >>".encode("ascii")
+
+    max_obj_id = max(objects)
+    output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0] * (max_obj_id + 1)
+    for obj_id in range(1, max_obj_id + 1):
+        offsets[obj_id] = len(output)
+        output.extend(f"{obj_id} 0 obj\n".encode("ascii"))
+        output.extend(objects[obj_id])
+        output.extend(b"\nendobj\n")
+
+    xref_offset = len(output)
+    output.extend(f"xref\n0 {max_obj_id + 1}\n".encode("ascii"))
+    output.extend(b"0000000000 65535 f \n")
+    for obj_id in range(1, max_obj_id + 1):
+        output.extend(f"{offsets[obj_id]:010d} 00000 n \n".encode("ascii"))
+    output.extend(f"trailer\n<< /Size {max_obj_id + 1} /Root 1 0 R >>\n".encode("ascii"))
+    output.extend(f"startxref\n{xref_offset}\n%%EOF\n".encode("ascii"))
+    report_file.write_bytes(bytes(output))
+
+
+def generate_pdf_report(report_file: Path, run_timestamp: str, status: str, inventory: dict, records: list[dict]) -> None:
+    lines = build_pdf_report_lines(run_timestamp, status, inventory, records)
+    write_text_pdf(report_file, lines)
+
+
 def generate_html_report(
     report_file: Path,
     run_timestamp: str,
@@ -801,6 +997,7 @@ def write_final_reports(
     csv_report = ROOT / "reports" / "uat_validation_report.csv"
     json_report = ROOT / "reports" / "uat_validation_report.json"
     html_report = ROOT / "reports" / "uat_validation_report.html"
+    pdf_report = ROOT / "reports" / "uat_validation_report.pdf"
     manifest_report = ROOT / "reports" / "run_manifest.json"
 
     write_csv(csv_report, records, REPORT_FIELDNAMES)
@@ -820,6 +1017,7 @@ def write_final_reports(
         },
     )
     generate_html_report(html_report, run_timestamp, status, inventory, records, package_rows, clinical_rows, document_rows)
+    generate_pdf_report(pdf_report, run_timestamp, status, inventory, records)
 
     report_files = [
         ROOT / "reports" / "environment_report.txt",
@@ -828,6 +1026,7 @@ def write_final_reports(
         csv_report,
         json_report,
         html_report,
+        pdf_report,
     ]
     details = []
     for path in report_files:
@@ -1203,6 +1402,7 @@ def run_uat() -> tuple[str, list[dict]]:
         ROOT / "reports" / "uat_validation_report.csv",
         ROOT / "reports" / "uat_validation_report.json",
         ROOT / "reports" / "uat_validation_report.html",
+        ROOT / "reports" / "uat_validation_report.pdf",
         ROOT / "reports" / "run_manifest.json",
     ]
     records.append(
@@ -1212,7 +1412,7 @@ def run_uat() -> tuple[str, list[dict]]:
             "Python",
             "Final UAT report generation",
             "PASS",
-            "Final CSV, JSON, HTML, and manifest reports generated.",
+            "Final CSV, JSON, HTML, PDF, and manifest reports generated.",
             "Final report generation completed.",
             output_file="; ".join(safe_rel(path) for path in final_report_files),
         )
@@ -1291,6 +1491,13 @@ def write_emergency_error_report(exc: Exception) -> None:
         [],
         [],
     )
+    generate_pdf_report(
+        ROOT / "reports" / "uat_validation_report.pdf",
+        now_iso(),
+        "ERROR",
+        inventory,
+        [error_record],
+    )
     write_json(
         ROOT / "reports" / "run_manifest.json",
         {
@@ -1306,6 +1513,7 @@ def write_emergency_error_report(exc: Exception) -> None:
                 "reports/uat_validation_report.csv",
                 "reports/uat_validation_report.json",
                 "reports/uat_validation_report.html",
+                "reports/uat_validation_report.pdf",
                 "reports/run_manifest.json",
             ],
         },
@@ -1326,6 +1534,7 @@ def print_summary(status: str, records: list[dict]) -> None:
     print(f"- {ROOT / 'reports' / 'uat_validation_report.csv'}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.json'}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.html'}")
+    print(f"- {ROOT / 'reports' / 'uat_validation_report.pdf'}")
     print(f"- {ROOT / 'reports' / 'run_manifest.json'}")
 
 

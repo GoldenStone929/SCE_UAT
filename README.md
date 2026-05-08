@@ -113,6 +113,12 @@ run_uat_ssh.bat
 
 `run_uat_windows.bat` is kept for interactive double-click usage and intentionally pauses before closing so users can read console output.
 
+For every root-level run, `run_uat.py` also generates a final all-in-one PDF report:
+
+- path: `reports/uat_validation_report.pdf`
+- content: all recorded UAT tests grouped by section (`Layer 0` through `Layer 7`)
+- table format: XOR marks in each row (`V` for PASS, `X` for non-PASS)
+
 Required filesystem permissions for successful startup and execution:
 
 - create, write, read, append, and delete under `outputs/`;
@@ -129,6 +135,7 @@ This package does not install Python, R, or Python/R packages.
 
 Final reports are written to `reports/`:
 
+- `uat_validation_report.pdf`: final all-in-one reviewer report grouped by UAT section with XOR row marks (`V`/`X`).
 - `uat_validation_report.html`: recommended first review artifact.
 - `uat_validation_report.csv`: detailed test-result table.
 - `uat_validation_report.json`: machine-readable detailed report.
@@ -272,6 +279,12 @@ If a clinical validation fails:
 Start with:
 
 ```text
+reports/uat_validation_report.pdf
+```
+
+Then review:
+
+```text
 reports/uat_validation_report.html
 ```
 
@@ -290,6 +303,7 @@ Before accepting the UAT evidence, confirm:
 
 - The package was run from the package root on Windows Server 2019.
 - The run used `python run_uat.py`, `py run_uat.py`, `run_uat_ssh.bat`, or `run_uat_windows.bat`.
+- `reports/uat_validation_report.pdf` exists and opens.
 - `reports/uat_validation_report.html` exists and opens.
 - `reports/uat_validation_report.csv` exists and contains detailed test rows.
 - `reports/uat_validation_report.json` exists and is machine-readable.
@@ -324,6 +338,7 @@ run_uat_ssh.bat
 
 Then confirm that `reports/` contains:
 
+- `uat_validation_report.pdf`
 - `uat_validation_report.html`
 - `uat_validation_report.csv`
 - `uat_validation_report.json`
@@ -390,7 +405,8 @@ Verified implementation points:
 - `run_uat_ssh.bat` is headless-safe (no pause) and returns the UAT exit code.
 - Optional missing packages are reported as `NOT_AVAILABLE`, not `FAIL`.
 - With `required_r_tests=true`, missing Rscript is treated as a required failure.
-- Final reports are generated under `reports/`.
+- Final reports are generated under `reports/`, including `uat_validation_report.pdf`.
+- The final PDF groups all recorded tests by UAT section and uses XOR row marks (`V`/`X`).
 - Runtime logs and test evidence are generated under `outputs/`.
 - No package installation commands are included.
 - No fixed drive letters, usernames, network paths, or hardcoded Rscript paths are required.
