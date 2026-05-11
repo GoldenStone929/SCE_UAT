@@ -28,7 +28,6 @@ SCE_UAT_R_Python_Test_Package/
   run_uat_ssh.bat
   SCE_UAT_Final_Report.docx  (generated after each run)
   README.md
-  PDF_GENERATION_README.md
   config.json
   data/
     input/
@@ -362,6 +361,10 @@ Also confirm the package root contains:
 If this package is distributed through GitHub, clone or download the repository and run from the package root on Windows Server 2019.
 
 GitHub should contain the source package, configuration, fake input data, expected results, scripts, and documentation. Generated UAT evidence under `outputs/` and `reports/` is intentionally ignored by Git because each SCE run creates fresh environment-specific evidence.
+
+The root-level Word report `SCE_UAT_Final_Report.docx` is also ignored by Git. It appears only **on your machine** in the package root **after you run** `run_uat.py`, `run_uat_ssh.bat`, or `run_uat_windows.bat`. You will **not** see it in the GitHub file browser unless someone commits binary evidence on purpose.
+
+The runner creates the folder **`outputs/`** (plural name), not `output/`.
 
 After cloning or downloading from GitHub, run one of:
 
