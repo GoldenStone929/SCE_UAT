@@ -53,6 +53,7 @@ ALLOWED_STATUSES = {"PASS", "FAIL", "WARNING", "NOT_AVAILABLE", "SKIPPED", "ERRO
 RUN_LOCK_FILE = ROOT / "outputs" / ".sce_uat_run.lock"
 STARTUP_ERROR_FILE = ROOT / "reports" / "startup_error.txt"
 ROOT_FINAL_WORD_REPORT = ROOT / "Final_Report.docx"
+REPORTS_FINAL_WORD_REPORT = ROOT / "reports" / "Final_Report.docx"
 
 
 class RunLockError(RuntimeError):
@@ -286,25 +287,36 @@ def clean_generated_artifacts(root: Path) -> dict:
         "removed_files": 0,
         "removed_directories": 0,
         "recreated_directories": [],
+        "cleanup_errors": [],
     }
 
     for directory in GENERATED_ROOT_DIRS:
         _assert_within_root(directory)
         directory.mkdir(parents=True, exist_ok=True)
-        for child in directory.iterdir():
+        generated_paths = sorted(directory.rglob("*"), key=lambda path: len(path.parts), reverse=True)
+        for child in generated_paths:
             _assert_within_root(child)
             if child == RUN_LOCK_FILE:
                 continue
-            if child.is_dir():
-                shutil.rmtree(child)
-                summary["removed_directories"] += 1
-            else:
-                child.unlink()
-                summary["removed_files"] += 1
+            try:
+                if child.is_dir() and not child.is_symlink():
+                    continue
+                else:
+                    child.unlink()
+                    summary["removed_files"] += 1
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                summary["cleanup_errors"].append(f"{safe_rel(child)}: {exc}")
 
     ensure_directories()
-    if ROOT_FINAL_WORD_REPORT.exists():
-        ROOT_FINAL_WORD_REPORT.unlink()
+    for final_word_report in (ROOT_FINAL_WORD_REPORT, REPORTS_FINAL_WORD_REPORT):
+        try:
+            if final_word_report.exists():
+                final_word_report.unlink()
+                summary["removed_files"] += 1
+        except OSError as exc:
+            summary["cleanup_errors"].append(f"{safe_rel(final_word_report)}: {exc}")
     summary["recreated_directories"] = [safe_rel(path) for path in OUTPUT_DIRS]
     return summary
 
@@ -1308,6 +1320,7 @@ def write_final_reports(
     html_report = ROOT / "reports" / "uat_validation_report.html"
     markdown_report = ROOT / "reports" / "uat_validation_report.md"
     word_report = ROOT_FINAL_WORD_REPORT
+    reports_word_report = REPORTS_FINAL_WORD_REPORT
     manifest_report = ROOT / "reports" / "run_manifest.json"
 
     write_csv(csv_report, records, REPORT_FIELDNAMES)
@@ -1330,9 +1343,11 @@ def write_final_reports(
     markdown_text = build_markdown_report(run_timestamp, status, inventory, records)
     write_markdown_report(markdown_report, markdown_text)
     write_docx_report(word_report, run_timestamp, status, inventory, records)
+    shutil.copy2(word_report, reports_word_report)
 
     report_files = [
         word_report,
+        reports_word_report,
         ROOT / "reports" / "environment_report.txt",
         ROOT / "reports" / "permission_report.txt",
         ROOT / "reports" / "package_availability.csv",
@@ -1436,19 +1451,25 @@ def run_uat() -> tuple[str, list[dict]]:
         os.environ["SCE_UAT_RSCRIPT"] = rscript_path
     inventory = collect_environment_inventory(rscript_path)
 
+    cleanup_errors = cleanup_summary.get("cleanup_errors", [])
+    cleanup_actual = (
+        f"Removed {cleanup_summary['removed_files']} files and "
+        f"{cleanup_summary['removed_directories']} directories; recreated run folders."
+    )
+    if cleanup_errors:
+        cleanup_actual += f" Cleanup warnings: {len(cleanup_errors)} path(s) could not be removed."
+
     records.append(
         make_record(
             test_id="generated_artifact_cleanup",
             layer="Layer 0",
             language="Python",
             test_name="Generated artifact cleanup",
-            status="PASS",
+            status="WARNING" if cleanup_errors else "PASS",
             expected_result="Previously generated files under outputs/ and reports/ are cleared before the run.",
-            actual_result=(
-                f"Removed {cleanup_summary['removed_files']} files and "
-                f"{cleanup_summary['removed_directories']} directories; recreated run folders."
-            ),
+            actual_result=cleanup_actual,
             output_file="outputs/; reports/",
+            error_message="; ".join(cleanup_errors[:5]),
         )
     )
 
@@ -1726,6 +1747,7 @@ def run_uat() -> tuple[str, list[dict]]:
     final_status = overall_status(records, required_ids - {"final_report_generation"})
     final_report_files = [
         ROOT_FINAL_WORD_REPORT,
+        REPORTS_FINAL_WORD_REPORT,
         ROOT / "reports" / "uat_validation_report.csv",
         ROOT / "reports" / "uat_validation_report.json",
         ROOT / "reports" / "uat_validation_report.html",
@@ -1739,7 +1761,7 @@ def run_uat() -> tuple[str, list[dict]]:
             "Python",
             "Final UAT report generation",
             "PASS",
-            "Final root-level Word, CSV, JSON, HTML, Markdown, and manifest reports generated.",
+            "Final Word report generated at the project root and in reports/, with CSV, JSON, HTML, Markdown, and manifest reports generated.",
             "Final report generation completed.",
             output_file="; ".join(safe_rel(path) for path in final_report_files),
         )
@@ -1821,6 +1843,7 @@ def write_emergency_error_report(exc: Exception) -> None:
     markdown_text = build_markdown_report(now_iso(), "ERROR", inventory, [error_record])
     write_markdown_report(ROOT / "reports" / "uat_validation_report.md", markdown_text)
     write_docx_report(ROOT_FINAL_WORD_REPORT, now_iso(), "ERROR", inventory, [error_record])
+    shutil.copy2(ROOT_FINAL_WORD_REPORT, REPORTS_FINAL_WORD_REPORT)
     write_json(
         ROOT / "reports" / "run_manifest.json",
         {
@@ -1832,6 +1855,7 @@ def write_emergency_error_report(exc: Exception) -> None:
             "overall_status": "ERROR",
             "report_files": [
                 safe_rel(ROOT_FINAL_WORD_REPORT),
+                safe_rel(REPORTS_FINAL_WORD_REPORT),
                 "reports/environment_report.txt",
                 "reports/permission_report.txt",
                 "reports/uat_validation_report.csv",
@@ -1856,11 +1880,15 @@ def print_summary(status: str, records: list[dict]) -> None:
     print("")
     print("Final report paths:")
     print(f"- {ROOT_FINAL_WORD_REPORT}")
+    print(f"- {REPORTS_FINAL_WORD_REPORT}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.csv'}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.json'}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.html'}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.md'}")
     print(f"- {ROOT / 'reports' / 'run_manifest.json'}")
+    print("")
+    print("Note: If Windows Explorer hides file extensions, the Word report appears as 'Final_Report'")
+    print("with Type 'Microsoft Word Document'.")
 
 
 def main() -> int:

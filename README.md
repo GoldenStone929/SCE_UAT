@@ -17,7 +17,7 @@ The package writes only within its own `outputs/` and `reports/` folders and doe
 - Python package and R package availability without installing anything.
 - Python orchestration of R through `Rscript`.
 - Fake clinical dataset processing and validation against expected results.
-- Final audit-friendly reporting in a root-level Word document and supporting files under `reports/`.
+- Final audit-friendly reporting in a root-level Word document, a matching `reports/` Word copy, and supporting files under `reports/`.
 
 ## 3. Folder structure
 
@@ -50,6 +50,7 @@ SCE_UAT_R_Python_Test_Package/
     logs/
     test_results/
   reports/
+    Final_Report.docx  (generated after each run)
 ```
 
 ## 4. How to run on Windows Server 2019
@@ -112,10 +113,11 @@ run_uat_ssh.bat
 
 `run_uat_ssh.bat` is non-interactive, does not use `pause`, and returns the UAT exit code to the calling shell.
 
-Every run writes the main reviewer report next to the root-level launchers:
+Every run writes the main reviewer report next to the root-level launchers and mirrors the same Word file into `reports/`:
 
 ```text
 Final_Report.docx
+reports/Final_Report.docx
 ```
 
 This Word report records all tests from the run, groups them by UAT layer, and uses an XOR table format (`Check` for PASS, `X` for non-PASS). It is intended to open cleanly in Microsoft Word on Windows.
@@ -135,9 +137,10 @@ This package does not install Python, R, or Python/R packages.
 
 ## 6. Output reports
 
-The primary all-in-one reviewer report is written at the package root:
+The primary all-in-one reviewer report is written at the package root and mirrored under `reports/`:
 
 - `Final_Report.docx`: final Word report grouped by UAT section with XOR row marks (`Check`/`X`).
+- `reports/Final_Report.docx`: identical copy for reviewers who start in the reports folder.
 
 Supporting reports are written to `reports/`:
 
@@ -157,7 +160,7 @@ Detailed evidence, logs, and generated test files are written under `outputs/`:
 - `outputs/python/`: Python-generated test outputs, including readable Python document outputs under `outputs/python/generated_documents/`.
 - `outputs/r/`: R-generated test outputs, including readable R document outputs under `outputs/r/generated_documents/`.
 
-Each run refreshes generated artifacts under `outputs/` and `reports/` before creating new evidence, and overwrites the root-level `Final_Report.docx`, so the review artifacts reflect the latest execution.
+Each run refreshes generated artifacts under `outputs/` and `reports/` before creating new evidence, and overwrites both `Final_Report.docx` and `reports/Final_Report.docx`, so the review artifacts reflect the latest execution.
 
 ## 7. Status definitions
 
@@ -290,6 +293,7 @@ Start with:
 
 ```text
 Final_Report.docx
+reports/Final_Report.docx
 ```
 
 Then review:
@@ -314,6 +318,7 @@ Before accepting the UAT evidence, confirm:
 - The package was run from the package root on Windows Server 2019.
 - The run used `python run_uat.py`, `py run_uat.py`, `run_uat_ssh.bat`, or `run_uat_windows.bat`.
 - `Final_Report.docx` exists beside the root-level launcher scripts and opens in Word.
+- `reports/Final_Report.docx` exists as the reports-folder copy and opens in Word.
 - `reports/uat_validation_report.md` exists and is readable.
 - `reports/uat_validation_report.html` exists and opens.
 - `reports/uat_validation_report.csv` exists and contains detailed test rows.
@@ -343,6 +348,7 @@ py run_uat.py
 
 Then confirm that `reports/` contains:
 
+- `Final_Report.docx`
 - `uat_validation_report.html`
 - `uat_validation_report.md`
 - `uat_validation_report.csv`
@@ -362,7 +368,9 @@ If this package is distributed through GitHub, clone or download the repository 
 
 GitHub should contain the source package, configuration, fake input data, expected results, scripts, and documentation. Generated UAT evidence under `outputs/` and `reports/` is intentionally ignored by Git because each SCE run creates fresh environment-specific evidence.
 
-The root-level Word report `Final_Report.docx` is also ignored by Git. It appears only **on your machine** in the package root **after you run** `python run_uat.py`, `py run_uat.py`, or `run_uat_windows.bat`. You will **not** see it in the GitHub file browser unless someone commits binary evidence on purpose.
+The Word reports `Final_Report.docx` and `reports/Final_Report.docx` are also ignored by Git. They appear only **on your machine** after you run `python run_uat.py`, `py run_uat.py`, or `run_uat_windows.bat`. You will **not** see them in the GitHub file browser unless someone commits binary evidence on purpose.
+
+If Windows Explorer is configured to hide file extensions, `Final_Report.docx` appears simply as `Final_Report` with Type `Microsoft Word Document`.
 
 The runner creates the folder **`outputs/`** (plural name), not `output/`.
 
@@ -411,7 +419,7 @@ Verified implementation points:
 - `run_uat_windows.bat` uses `cd /d "%~dp0"` and is designed to support package folders with spaces in the path.
 - Optional missing packages are reported as `NOT_AVAILABLE`, not `FAIL`.
 - With `required_r_tests=true`, missing Rscript is treated as a required failure.
-- The final Word reviewer report is generated at the package root as `Final_Report.docx`.
+- The final Word reviewer report is generated at the package root as `Final_Report.docx` and mirrored as `reports/Final_Report.docx`.
 - Supporting reports are generated under `reports/`, including readable HTML and Markdown summaries.
 - Runtime logs and test evidence are generated under `outputs/`.
 - Python generated documents are written under `outputs/python/generated_documents/`.
