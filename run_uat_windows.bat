@@ -29,7 +29,8 @@ set UAT_EXIT_CODE=1
 :done
 echo.
 echo UAT finished with exit code %UAT_EXIT_CODE%.
-echo Review the reports folder for results.
+echo Review Final_Report.docx in this folder for the main reviewer report.
+echo Review the reports folder for supporting CSV, JSON, HTML, Markdown, and manifest results.
 echo.
 pause
 exit /b %UAT_EXIT_CODE%

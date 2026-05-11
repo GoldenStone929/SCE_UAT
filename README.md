@@ -157,7 +157,7 @@ Detailed evidence, logs, and generated test files are written under `outputs/`:
 - `outputs/python/`: Python-generated test outputs, including readable Python document outputs under `outputs/python/generated_documents/`.
 - `outputs/r/`: R-generated test outputs, including readable R document outputs under `outputs/r/generated_documents/`.
 
-Each run refreshes generated artifacts under `outputs/` and `reports/` before creating new evidence, so reports reflect the latest execution.
+Each run refreshes generated artifacts under `outputs/` and `reports/` before creating new evidence, and overwrites the root-level `Final_Report.docx`, so the review artifacts reflect the latest execution.
 
 ## 7. Status definitions
 
@@ -362,7 +362,7 @@ If this package is distributed through GitHub, clone or download the repository 
 
 GitHub should contain the source package, configuration, fake input data, expected results, scripts, and documentation. Generated UAT evidence under `outputs/` and `reports/` is intentionally ignored by Git because each SCE run creates fresh environment-specific evidence.
 
-The root-level Word report `Final_Report.docx` is also ignored by Git. It appears only **on your machine** in the package root **after you run** `run_uat.py`, `run_uat_ssh.bat`, or `run_uat_windows.bat`. You will **not** see it in the GitHub file browser unless someone commits binary evidence on purpose.
+The root-level Word report `Final_Report.docx` is also ignored by Git. It appears only **on your machine** in the package root **after you run** `python run_uat.py`, `py run_uat.py`, or `run_uat_windows.bat`. You will **not** see it in the GitHub file browser unless someone commits binary evidence on purpose.
 
 The runner creates the folder **`outputs/`** (plural name), not `output/`.
 

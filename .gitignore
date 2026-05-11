@@ -8,7 +8,8 @@ SCE_UAT_Final_Report.docx
 !outputs/
 !outputs/python/
 !outputs/r/
-!outputs/generated_documents/
+!outputs/python/generated_documents/
+!outputs/r/generated_documents/
 !outputs/logs/
 !outputs/test_results/
 !reports/
