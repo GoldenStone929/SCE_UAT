@@ -26,7 +26,7 @@ SCE_UAT_R_Python_Test_Package/
   run_uat.py
   run_uat_windows.bat
   run_uat_ssh.bat
-  SCE_UAT_Final_Report.docx  (generated after each run)
+  Final_Report.docx  (generated after each run)
   README.md
   config.json
   data/
@@ -115,7 +115,7 @@ run_uat_ssh.bat
 Every run writes the main reviewer report next to the root-level launchers:
 
 ```text
-SCE_UAT_Final_Report.docx
+Final_Report.docx
 ```
 
 This Word report records all tests from the run, groups them by UAT layer, and uses an XOR table format (`Check` for PASS, `X` for non-PASS). It is intended to open cleanly in Microsoft Word on Windows.
@@ -137,7 +137,7 @@ This package does not install Python, R, or Python/R packages.
 
 The primary all-in-one reviewer report is written at the package root:
 
-- `SCE_UAT_Final_Report.docx`: final Word report grouped by UAT section with XOR row marks (`Check`/`X`).
+- `Final_Report.docx`: final Word report grouped by UAT section with XOR row marks (`Check`/`X`).
 
 Supporting reports are written to `reports/`:
 
@@ -289,7 +289,7 @@ If a clinical validation fails:
 Start with:
 
 ```text
-SCE_UAT_Final_Report.docx
+Final_Report.docx
 ```
 
 Then review:
@@ -313,7 +313,7 @@ Before accepting the UAT evidence, confirm:
 
 - The package was run from the package root on Windows Server 2019.
 - The run used `python run_uat.py`, `py run_uat.py`, `run_uat_ssh.bat`, or `run_uat_windows.bat`.
-- `SCE_UAT_Final_Report.docx` exists beside the root-level launcher scripts and opens in Word.
+- `Final_Report.docx` exists beside the root-level launcher scripts and opens in Word.
 - `reports/uat_validation_report.md` exists and is readable.
 - `reports/uat_validation_report.html` exists and opens.
 - `reports/uat_validation_report.csv` exists and contains detailed test rows.
@@ -354,7 +354,7 @@ Then confirm that `reports/` contains:
 
 Also confirm the package root contains:
 
-- `SCE_UAT_Final_Report.docx`
+- `Final_Report.docx`
 
 ## 17. GitHub distribution note
 
@@ -362,7 +362,7 @@ If this package is distributed through GitHub, clone or download the repository 
 
 GitHub should contain the source package, configuration, fake input data, expected results, scripts, and documentation. Generated UAT evidence under `outputs/` and `reports/` is intentionally ignored by Git because each SCE run creates fresh environment-specific evidence.
 
-The root-level Word report `SCE_UAT_Final_Report.docx` is also ignored by Git. It appears only **on your machine** in the package root **after you run** `run_uat.py`, `run_uat_ssh.bat`, or `run_uat_windows.bat`. You will **not** see it in the GitHub file browser unless someone commits binary evidence on purpose.
+The root-level Word report `Final_Report.docx` is also ignored by Git. It appears only **on your machine** in the package root **after you run** `run_uat.py`, `run_uat_ssh.bat`, or `run_uat_windows.bat`. You will **not** see it in the GitHub file browser unless someone commits binary evidence on purpose.
 
 The runner creates the folder **`outputs/`** (plural name), not `output/`.
 
@@ -411,7 +411,7 @@ Verified implementation points:
 - `run_uat_windows.bat` uses `cd /d "%~dp0"` and is designed to support package folders with spaces in the path.
 - Optional missing packages are reported as `NOT_AVAILABLE`, not `FAIL`.
 - With `required_r_tests=true`, missing Rscript is treated as a required failure.
-- The final Word reviewer report is generated at the package root as `SCE_UAT_Final_Report.docx`.
+- The final Word reviewer report is generated at the package root as `Final_Report.docx`.
 - Supporting reports are generated under `reports/`, including readable HTML and Markdown summaries.
 - Runtime logs and test evidence are generated under `outputs/`.
 - Python generated documents are written under `outputs/python/generated_documents/`.

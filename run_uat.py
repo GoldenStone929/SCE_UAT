@@ -52,7 +52,7 @@ REPORT_FIELDNAMES = [
 ALLOWED_STATUSES = {"PASS", "FAIL", "WARNING", "NOT_AVAILABLE", "SKIPPED", "ERROR"}
 RUN_LOCK_FILE = ROOT / "outputs" / ".sce_uat_run.lock"
 STARTUP_ERROR_FILE = ROOT / "reports" / "startup_error.txt"
-ROOT_FINAL_WORD_REPORT = ROOT / "SCE_UAT_Final_Report.docx"
+ROOT_FINAL_WORD_REPORT = ROOT / "Final_Report.docx"
 
 
 class RunLockError(RuntimeError):
