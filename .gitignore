@@ -2,6 +2,7 @@
 outputs/**
 reports/**
 Final_Report.docx
+SCE_UAT_Final_Report.docx
 
 # Keep folder names visible in local working copies if placeholders are added later.
 !outputs/
