@@ -23,6 +23,14 @@ def read_metric_csv(path, value_column):
         return {row["metric"]: row[value_column] for row in csv.DictReader(handle)}
 
 
+def load_config(root):
+    config_file = root / "config.json"
+    if not config_file.exists():
+        return {}
+    with config_file.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def valid_rscript_path(candidate):
     if not candidate:
         return None
@@ -102,10 +110,35 @@ def windows_env_rscript_candidates():
     return candidates
 
 
-def discover_rscript():
+def configured_rscript_candidates(config):
+    config = config or {}
+    candidates = [config.get("rscript_path") or None]
+    config_roots = config.get("rscript_search_roots", [])
+    if isinstance(config_roots, str):
+        config_roots = [config_roots]
+    if isinstance(config_roots, list):
+        for root in config_roots:
+            if not str(root).strip():
+                continue
+            root_path = Path(str(root)).expanduser()
+            candidates.extend(
+                [
+                    root_path / "Rscript.exe",
+                    root_path / "Rscript",
+                    root_path / "bin" / "Rscript.exe",
+                    root_path / "bin" / "Rscript",
+                    root_path / "bin" / "x64" / "Rscript.exe",
+                    root_path / "bin" / "i386" / "Rscript.exe",
+                ]
+            )
+    return candidates
+
+
+def discover_rscript(config=None):
     candidates = []
     configured_rscript = os.environ.get("SCE_UAT_RSCRIPT", "").strip()
     candidates.append(configured_rscript or None)
+    candidates.extend(configured_rscript_candidates(config))
     candidates.append(shutil.which("Rscript"))
 
     r_home = os.environ.get("R_HOME", "").strip()
@@ -135,7 +168,7 @@ def main():
     root = get_root()
     result_file = root / "outputs" / "test_results" / "python_calls_r_validation.json"
     result_file.parent.mkdir(parents=True, exist_ok=True)
-    rscript_path = discover_rscript()
+    rscript_path = discover_rscript(load_config(root))
     r_script = root / "scripts" / "r" / "04_r_clinical_summary.R"
     r_output = root / "outputs" / "r" / "ae_summary_from_r.csv"
     expected_file = root / "data" / "expected" / "expected_ae_summary.csv"

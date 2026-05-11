@@ -5,5 +5,7 @@
   "allow_optional_package_tests": true,
   "allow_document_generation_tests": true,
   "treat_missing_optional_packages_as_failure": false,
-  "output_timezone": "local"
+  "output_timezone": "local",
+  "rscript_path": "",
+  "rscript_search_roots": []
 }

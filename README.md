@@ -17,7 +17,7 @@ The package writes only within its own `outputs/` and `reports/` folders and doe
 - Python package and R package availability without installing anything.
 - Python orchestration of R through `Rscript`.
 - Fake clinical dataset processing and validation against expected results.
-- Final audit-friendly reporting under `reports/`.
+- Final audit-friendly reporting in a root-level Word document and supporting files under `reports/`.
 
 ## 3. Folder structure
 
@@ -25,6 +25,8 @@ The package writes only within its own `outputs/` and `reports/` folders and doe
 SCE_UAT_R_Python_Test_Package/
   run_uat.py
   run_uat_windows.bat
+  run_uat_ssh.bat
+  SCE_UAT_Final_Report.docx  (generated after each run)
   README.md
   PDF_GENERATION_README.md
   config.json
@@ -95,6 +97,30 @@ The helper launcher only starts the root-level `run_uat.py`. The audited runner 
 
 The root-level launcher derives the package root from its own location and then runs all tests using relative paths.
 
+## Remote SSH / Headless Execution
+
+For remote Windows sessions, SSH sessions, scheduled jobs, and other headless execution, use one of:
+
+```cmd
+python run_uat.py
+```
+
+or:
+
+```cmd
+run_uat_ssh.bat
+```
+
+`run_uat_ssh.bat` is non-interactive, does not use `pause`, and returns the UAT exit code to the calling shell.
+
+Every run writes the main reviewer report next to the root-level launchers:
+
+```text
+SCE_UAT_Final_Report.docx
+```
+
+This Word report records all tests from the run, groups them by UAT layer, and uses an XOR table format (`Check` for PASS, `X` for non-PASS). It is intended to open cleanly in Microsoft Word on Windows.
+
 Required filesystem permissions for successful startup and execution:
 
 - create, write, read, append, and delete under `outputs/`;
@@ -104,16 +130,20 @@ R runtime requirement for headless and interactive runs:
 
 - `Rscript` should be available through Windows PATH, R installation registration, or R-related environment values; or
 - set `SCE_UAT_RSCRIPT` to an explicit `Rscript.exe` executable path.
+- if R is only easy to locate from RStudio, run `cat(file.path(R.home("bin"), "Rscript.exe"))` in RStudio and copy that path into `SCE_UAT_RSCRIPT` or `config.json` as `rscript_path`.
 
 This package does not install Python, R, or Python/R packages.
 
 ## 6. Output reports
 
-Final reports are written to `reports/`:
+The primary all-in-one reviewer report is written at the package root:
+
+- `SCE_UAT_Final_Report.docx`: final Word report grouped by UAT section with XOR row marks (`Check`/`X`).
+
+Supporting reports are written to `reports/`:
 
 - `uat_validation_report.html`: recommended first review artifact.
 - `uat_validation_report.md`: readable Markdown reviewer summary.
-- `uat_validation_report.pdf`: readable PDF-style reviewer summary generated from Markdown text.
 - `uat_validation_report.csv`: detailed test-result table.
 - `uat_validation_report.json`: machine-readable detailed report.
 - `environment_report.txt`: Python, R, system, and runtime inventory.
@@ -215,7 +245,9 @@ Default configuration:
   "allow_optional_package_tests": true,
   "allow_document_generation_tests": true,
   "treat_missing_optional_packages_as_failure": false,
-  "output_timezone": "local"
+  "output_timezone": "local",
+  "rscript_path": "",
+  "rscript_search_roots": []
 }
 ```
 
@@ -232,7 +264,9 @@ If Python does not start:
 If R tests fail:
 
 - Confirm `Rscript` is available to the Windows Server 2019 session.
-- If R works in RStudio but `Rscript` is not on the Windows PATH, set `SCE_UAT_RSCRIPT` to the full `Rscript.exe` path before running, or confirm the R installation is registered in Windows.
+- If R works in RStudio but `Rscript` is not on the Windows PATH, run `cat(file.path(R.home("bin"), "Rscript.exe"))` in RStudio.
+- Set `SCE_UAT_RSCRIPT` to that full `Rscript.exe` path, or paste it into `config.json` as `rscript_path`.
+- If R is in a custom folder, add that folder to `rscript_search_roots` in `config.json`.
 - Review `reports/environment_report.txt`.
 - Review R logs under `outputs/logs/`.
 
@@ -256,13 +290,13 @@ If a clinical validation fails:
 Start with:
 
 ```text
-reports/uat_validation_report.html
+SCE_UAT_Final_Report.docx
 ```
 
 Then review:
 
 ```text
-reports/uat_validation_report.md
+reports/uat_validation_report.html
 ```
 
 Recommended review order:
@@ -279,8 +313,8 @@ Recommended review order:
 Before accepting the UAT evidence, confirm:
 
 - The package was run from the package root on Windows Server 2019.
-- The run used `python run_uat.py`, `py run_uat.py`, or `run_uat_windows.bat`.
-- `reports/uat_validation_report.pdf` exists and opens.
+- The run used `python run_uat.py`, `py run_uat.py`, `run_uat_ssh.bat`, or `run_uat_windows.bat`.
+- `SCE_UAT_Final_Report.docx` exists beside the root-level launcher scripts and opens in Word.
 - `reports/uat_validation_report.md` exists and is readable.
 - `reports/uat_validation_report.html` exists and opens.
 - `reports/uat_validation_report.csv` exists and contains detailed test rows.
@@ -312,13 +346,16 @@ Then confirm that `reports/` contains:
 
 - `uat_validation_report.html`
 - `uat_validation_report.md`
-- `uat_validation_report.pdf`
 - `uat_validation_report.csv`
 - `uat_validation_report.json`
 - `run_manifest.json`
 - `environment_report.txt`
 - `permission_report.txt`
 - `package_availability.csv`
+
+Also confirm the package root contains:
+
+- `SCE_UAT_Final_Report.docx`
 
 ## 17. GitHub distribution note
 
@@ -371,7 +408,8 @@ Verified implementation points:
 - `run_uat_windows.bat` uses `cd /d "%~dp0"` and is designed to support package folders with spaces in the path.
 - Optional missing packages are reported as `NOT_AVAILABLE`, not `FAIL`.
 - With `required_r_tests=true`, missing Rscript is treated as a required failure.
-- Final reports are generated under `reports/`, including readable HTML, Markdown, and PDF summaries.
+- The final Word reviewer report is generated at the package root as `SCE_UAT_Final_Report.docx`.
+- Supporting reports are generated under `reports/`, including readable HTML and Markdown summaries.
 - Runtime logs and test evidence are generated under `outputs/`.
 - Python generated documents are written under `outputs/python/generated_documents/`.
 - R generated documents are written under `outputs/r/generated_documents/`.

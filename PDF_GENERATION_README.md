@@ -1,10 +1,10 @@
-# PDF Generation README
+# Final Word Report README
 
 ## Purpose of this file
 
-Use this README as source material for generating a polished PDF summary of the `SCE_UAT_R_Python_Test_Package`.
+Use this README as source material for generating a polished Word summary of the `SCE_UAT_R_Python_Test_Package`.
 
-The PDF should explain what the package is, what it tests, what each UAT layer means, what evidence is generated, and how a Windows Server 2019 SCE reviewer should interpret the results.
+The Word report should explain what the package is, what it tests, what each UAT layer means, what evidence is generated, and how a Windows Server 2019 SCE reviewer should interpret the results.
 
 The intended audience is:
 
@@ -14,7 +14,7 @@ The intended audience is:
 - QA or audit stakeholders
 - study programming leads
 
-## Recommended PDF title
+## Recommended Word report title
 
 ```text
 SCE UAT R/Python Functional Test Package
@@ -41,6 +41,12 @@ Windows users may also double-click:
 
 ```text
 run_uat_windows.bat
+```
+
+Remote/headless Windows users may run:
+
+```text
+run_uat_ssh.bat
 ```
 
 The package uses fake, non-PHI clinical-style data only. It does not install Python or R packages.
@@ -279,7 +285,7 @@ Layer 7 consolidates all test evidence into final reports.
 
 Final reports:
 
-- `reports/uat_validation_report.pdf`
+- `SCE_UAT_Final_Report.docx`
 - `reports/uat_validation_report.md`
 - `reports/uat_validation_report.html`
 - `reports/uat_validation_report.csv`
@@ -289,11 +295,11 @@ Final reports:
 - `reports/permission_report.txt`
 - `reports/package_availability.csv`
 
-The HTML report is the recommended first review artifact.
+The root-level Word report is the recommended first review artifact.
 
 ## Status interpretation
 
-Use these status definitions in the PDF:
+Use these status definitions in the Word report:
 
 - `PASS`: required behavior completed and matched the expected result.
 - `FAIL`: required behavior ran but did not meet the expected result.
@@ -311,7 +317,7 @@ Overall status values:
 
 ## Important portability points
 
-The PDF should clearly state:
+The Word report should clearly state:
 
 - Windows Server 2019 is the primary target environment.
 - The package is portable and can be copied to an SCE workspace.
@@ -330,9 +336,9 @@ Include a clear statement:
 This package contains no real patient data and no Protected Health Information. All datasets are synthetic and are intended only for SCE UAT evidence generation.
 ```
 
-## Suggested PDF sections
+## Suggested Word report sections
 
-Use this structure for the PDF:
+Use this structure for the Word report:
 
 1. Executive summary
 2. Purpose and target environment
@@ -349,12 +355,12 @@ Use this structure for the PDF:
 
 ## Copy/paste prompt for ChatGPT 5.5
 
-Use the following prompt to generate the PDF narrative:
+Use the following prompt to generate the Word report narrative:
 
 ```text
-You are preparing a polished PDF document for validation reviewers and clinical/statistical programming stakeholders.
+You are preparing a polished Word document for validation reviewers and clinical/statistical programming stakeholders.
 
-Create a professional PDF-style document titled:
+Create a professional Word-style document titled:
 "SCE UAT R/Python Functional Test Package - Windows Server 2019 SCE Validation Summary"
 
 Use the following content as source material. Explain the purpose of the package, the Windows Server 2019 target environment, what each UAT layer tests, what evidence files are generated, how to interpret statuses, and why the package is portable and non-PHI.
@@ -391,7 +397,7 @@ Source material:
 [Paste the contents of PDF_GENERATION_README.md and README.md here.]
 ```
 
-## Suggested evidence table for the PDF
+## Suggested evidence table for the Word report
 
 | Evidence area | Primary files |
 | --- | --- |
@@ -406,16 +412,16 @@ Source material:
 | R clinical validation | `outputs/test_results/r_clinical_validation.csv` |
 | Python-to-R orchestration | `outputs/test_results/python_calls_r_validation.json` |
 | Document generation | `outputs/test_results/python_document_generation_results.csv`, `outputs/test_results/r_document_generation_results.csv` |
-| Final UAT report | `reports/uat_validation_report.html`, `reports/uat_validation_report.md`, `reports/uat_validation_report.pdf`, `reports/uat_validation_report.csv`, `reports/uat_validation_report.json` |
+| Final UAT report | `SCE_UAT_Final_Report.docx`, `reports/uat_validation_report.html`, `reports/uat_validation_report.md`, `reports/uat_validation_report.csv`, `reports/uat_validation_report.json` |
 | Run manifest | `reports/run_manifest.json` |
 
-## Reviewer checklist for the PDF
+## Reviewer checklist for the Word report
 
 Include this checklist:
 
 - Confirm the package was run from the package root.
 - Confirm the target environment is Windows Server 2019 or the intended SCE.
-- Confirm `reports/uat_validation_report.pdf` exists and opens.
+- Confirm `SCE_UAT_Final_Report.docx` exists at the package root and opens in Word.
 - Confirm `reports/uat_validation_report.md` exists and is readable.
 - Confirm `reports/uat_validation_report.html` exists and opens.
 - Confirm required tests have no `FAIL` or `ERROR` status.

@@ -15,6 +15,7 @@ import sys
 import time
 import textwrap
 import traceback
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parent
@@ -51,6 +52,7 @@ REPORT_FIELDNAMES = [
 ALLOWED_STATUSES = {"PASS", "FAIL", "WARNING", "NOT_AVAILABLE", "SKIPPED", "ERROR"}
 RUN_LOCK_FILE = ROOT / "outputs" / ".sce_uat_run.lock"
 STARTUP_ERROR_FILE = ROOT / "reports" / "startup_error.txt"
+ROOT_FINAL_WORD_REPORT = ROOT / "SCE_UAT_Final_Report.docx"
 
 
 class RunLockError(RuntimeError):
@@ -136,37 +138,72 @@ def _windows_registry_rscript_candidates() -> list[Path]:
     return candidates
 
 
+def _rscript_candidates_from_search_roots(search_roots: list[Path]) -> list[Path]:
+    candidates: list[Path] = []
+    for search_root in search_roots:
+        if not search_root.exists():
+            continue
+        candidates.extend(
+            [
+                search_root / "Rscript.exe",
+                search_root / "Rscript",
+                search_root / "bin" / "Rscript.exe",
+                search_root / "bin" / "Rscript",
+                search_root / "bin" / "x64" / "Rscript.exe",
+                search_root / "bin" / "i386" / "Rscript.exe",
+            ]
+        )
+        try:
+            candidates.extend(search_root.glob("R-*/bin/Rscript.exe"))
+            candidates.extend(search_root.glob("R-*/bin/x64/Rscript.exe"))
+            candidates.extend(search_root.glob("R-*/bin/i386/Rscript.exe"))
+        except OSError:
+            continue
+    return candidates
+
+
+def _configured_rscript_candidates(config: dict | None = None) -> list[Path | str | None]:
+    config = config or {}
+    candidates: list[Path | str | None] = []
+    candidates.append(config.get("rscript_path") or None)
+
+    search_roots: list[Path] = []
+    config_roots = config.get("rscript_search_roots", [])
+    if isinstance(config_roots, str):
+        config_roots = [config_roots]
+    if isinstance(config_roots, list):
+        search_roots.extend(Path(str(item)).expanduser() for item in config_roots if str(item).strip())
+
+    env_roots = os.environ.get("SCE_UAT_RSCRIPT_SEARCH_ROOTS", "").strip()
+    if env_roots:
+        search_roots.extend(Path(item).expanduser() for item in env_roots.split(os.pathsep) if item.strip())
+
+    candidates.extend(_rscript_candidates_from_search_roots(search_roots))
+    return candidates
+
+
 def _windows_env_rscript_candidates() -> list[Path]:
     if platform.system().lower() != "windows":
         return []
-    candidates: list[Path] = []
+    search_roots: list[Path] = []
     for env_name in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LOCALAPPDATA"):
         base_value = os.environ.get(env_name, "").strip()
         if not base_value:
             continue
         base_path = Path(base_value)
-        search_roots = [base_path / "R"]
+        env_search_roots = [base_path / "R"]
         if env_name == "LOCALAPPDATA":
-            search_roots.append(base_path / "Programs" / "R")
-        for search_root in search_roots:
-            if not search_root.exists():
-                continue
-            for child in search_root.glob("R-*"):
-                candidates.extend(
-                    [
-                        child / "bin" / "Rscript.exe",
-                        child / "bin" / "x64" / "Rscript.exe",
-                        child / "bin" / "i386" / "Rscript.exe",
-                    ]
-                )
-    return candidates
+            env_search_roots.append(base_path / "Programs" / "R")
+        search_roots.extend(env_search_roots)
+    return _rscript_candidates_from_search_roots(search_roots)
 
 
-def discover_rscript() -> str | None:
+def discover_rscript(config: dict | None = None) -> str | None:
     candidates: list[Path | str | None] = []
 
     configured_rscript = os.environ.get("SCE_UAT_RSCRIPT", "").strip()
     candidates.append(configured_rscript or None)
+    candidates.extend(_configured_rscript_candidates(config))
     candidates.append(shutil.which("Rscript"))
 
     r_home = os.environ.get("R_HOME", "").strip()
@@ -266,6 +303,8 @@ def clean_generated_artifacts(root: Path) -> dict:
                 summary["removed_files"] += 1
 
     ensure_directories()
+    if ROOT_FINAL_WORD_REPORT.exists():
+        ROOT_FINAL_WORD_REPORT.unlink()
     summary["recreated_directories"] = [safe_rel(path) for path in OUTPUT_DIRS]
     return summary
 
@@ -930,6 +969,172 @@ def write_markdown_report(report_file: Path, markdown_text: str) -> None:
     report_file.write_text(markdown_text, encoding="utf-8")
 
 
+def docx_text(text: object) -> str:
+    return html.escape(str(text), quote=True)
+
+
+def docx_paragraph(text: object = "", bold: bool = False, size: int = 20) -> str:
+    run_properties = f"<w:rPr>{'<w:b/>' if bold else ''}<w:sz w:val=\"{size}\"/></w:rPr>"
+    return f"<w:p><w:r>{run_properties}<w:t xml:space=\"preserve\">{docx_text(text)}</w:t></w:r></w:p>"
+
+
+def docx_cell(value: object, width: int = 1800, bold: bool = False) -> str:
+    values = value if isinstance(value, list) else [value]
+    paragraphs = "".join(docx_paragraph(item, bold=bold, size=18) for item in values)
+    return (
+        f"<w:tc><w:tcPr><w:tcW w:w=\"{width}\" w:type=\"dxa\"/>"
+        f"<w:tcMar><w:top w:w=\"80\" w:type=\"dxa\"/><w:left w:w=\"80\" w:type=\"dxa\"/>"
+        f"<w:bottom w:w=\"80\" w:type=\"dxa\"/><w:right w:w=\"80\" w:type=\"dxa\"/></w:tcMar>"
+        f"</w:tcPr>{paragraphs}</w:tc>"
+    )
+
+
+def docx_table(rows: list[list[object]], widths: list[int], header_rows: int = 1) -> str:
+    border = '<w:top w:val="single" w:sz="4" w:space="0" w:color="808080"/>'
+    border += '<w:left w:val="single" w:sz="4" w:space="0" w:color="808080"/>'
+    border += '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="808080"/>'
+    border += '<w:right w:val="single" w:sz="4" w:space="0" w:color="808080"/>'
+    border += '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="808080"/>'
+    border += '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="808080"/>'
+    table_rows = []
+    for row_index, row in enumerate(rows):
+        cells = []
+        for cell_index, value in enumerate(row):
+            width = widths[cell_index] if cell_index < len(widths) else 1800
+            cells.append(docx_cell(value, width=width, bold=row_index < header_rows))
+        table_rows.append("<w:tr>" + "".join(cells) + "</w:tr>")
+    return (
+        "<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/>"
+        f"<w:tblBorders>{border}</w:tblBorders></w:tblPr>"
+        + "".join(table_rows)
+        + "</w:tbl>"
+    )
+
+
+def status_xor_marks(status: str) -> tuple[str, str]:
+    return ("", chr(10003)) if status == "PASS" else ("X", "")
+
+
+def evidence_cell(record: dict) -> list[str]:
+    lines: list[str] = []
+    actual = str(record.get("actual_result", "")).strip()
+    output_file = str(record.get("output_file", "")).strip()
+    error_message = str(record.get("error_message", "")).strip()
+    if actual:
+        lines.append(f"Actual: {actual}")
+    if output_file:
+        lines.append(f"Output: {output_file}")
+    if error_message:
+        lines.append(f"Error: {error_message}")
+    return lines or [""]
+
+
+def build_docx_document(run_timestamp: str, status: str, inventory: dict, records: list[dict]) -> str:
+    counts = count_statuses(records)
+    body_parts = [
+        docx_paragraph("SCE UAT Final All-in-One Test Report", bold=True, size=32),
+        docx_paragraph("Windows-based SCE UAT evidence generated from the project root.", size=20),
+        docx_table(
+            [
+                ["Item", "Value"],
+                ["Run timestamp", run_timestamp],
+                ["Overall status", status],
+                ["Project root", inventory.get("python", {}).get("project_root", str(ROOT))],
+                ["Root runner", "run_uat.py"],
+                ["Rscript found", inventory.get("r", {}).get("rscript_found", "")],
+                ["Rscript path", inventory.get("r", {}).get("rscript_path", "")],
+            ],
+            [2200, 6800],
+        ),
+        docx_paragraph("Status Counts", bold=True, size=26),
+        docx_table(
+            [
+                ["PASS", "FAIL", "WARNING", "NOT_AVAILABLE", "SKIPPED", "ERROR"],
+                [
+                    counts.get("PASS", 0),
+                    counts.get("FAIL", 0),
+                    counts.get("WARNING", 0),
+                    counts.get("NOT_AVAILABLE", 0),
+                    counts.get("SKIPPED", 0),
+                    counts.get("ERROR", 0),
+                ],
+            ],
+            [1200, 1200, 1600, 2200, 1400, 1200],
+        ),
+        docx_paragraph("XOR table rule: PASS rows are marked with a check mark; every non-PASS row is marked with X.", size=18),
+    ]
+
+    for layer_name, layer_records in grouped_records_by_layer(records):
+        section_counts = count_statuses(layer_records)
+        body_parts.append(docx_paragraph(layer_name, bold=True, size=26))
+        body_parts.append(
+            docx_paragraph(
+                "Layer counts: "
+                f"PASS={section_counts.get('PASS', 0)}, "
+                f"FAIL={section_counts.get('FAIL', 0)}, "
+                f"WARNING={section_counts.get('WARNING', 0)}, "
+                f"NOT_AVAILABLE={section_counts.get('NOT_AVAILABLE', 0)}, "
+                f"SKIPPED={section_counts.get('SKIPPED', 0)}, "
+                f"ERROR={section_counts.get('ERROR', 0)}",
+                size=18,
+            )
+        )
+        rows: list[list[object]] = [["X", "Check", "Status", "Test ID", "Language", "Test Name", "Evidence / Result"]]
+        for record in layer_records:
+            x_mark, check_mark = status_xor_marks(str(record.get("status", "")))
+            rows.append(
+                [
+                    x_mark,
+                    check_mark,
+                    record.get("status", ""),
+                    record.get("test_id", ""),
+                    record.get("language", ""),
+                    record.get("test_name", ""),
+                    evidence_cell(record),
+                ]
+            )
+        body_parts.append(docx_table(rows, [500, 700, 1200, 1900, 1300, 2500, 4200]))
+
+    body_parts.append(
+        '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="720" w:right="720" '
+        'w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr>'
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:body>"
+        + "".join(body_parts)
+        + "</w:body></w:document>"
+    )
+
+
+def write_docx_report(report_file: Path, run_timestamp: str, status: str, inventory: dict, records: list[dict]) -> None:
+    document_xml = build_docx_document(run_timestamp, status, inventory, records)
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/word/document.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        "</Types>"
+    )
+    relationships = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="word/document.xml"/>'
+        "</Relationships>"
+    )
+
+    report_file.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(report_file, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types)
+        archive.writestr("_rels/.rels", relationships)
+        archive.writestr("word/document.xml", document_xml)
+
+
 def write_text_pdf(report_file: Path, lines: list[str]) -> None:
     report_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1102,7 +1307,7 @@ def write_final_reports(
     json_report = ROOT / "reports" / "uat_validation_report.json"
     html_report = ROOT / "reports" / "uat_validation_report.html"
     markdown_report = ROOT / "reports" / "uat_validation_report.md"
-    pdf_report = ROOT / "reports" / "uat_validation_report.pdf"
+    word_report = ROOT_FINAL_WORD_REPORT
     manifest_report = ROOT / "reports" / "run_manifest.json"
 
     write_csv(csv_report, records, REPORT_FIELDNAMES)
@@ -1124,9 +1329,10 @@ def write_final_reports(
     generate_html_report(html_report, run_timestamp, status, inventory, records, package_rows, clinical_rows, document_rows)
     markdown_text = build_markdown_report(run_timestamp, status, inventory, records)
     write_markdown_report(markdown_report, markdown_text)
-    generate_pdf_report(pdf_report, markdown_text)
+    write_docx_report(word_report, run_timestamp, status, inventory, records)
 
     report_files = [
+        word_report,
         ROOT / "reports" / "environment_report.txt",
         ROOT / "reports" / "permission_report.txt",
         ROOT / "reports" / "package_availability.csv",
@@ -1134,7 +1340,6 @@ def write_final_reports(
         json_report,
         html_report,
         markdown_report,
-        pdf_report,
     ]
     details = []
     for path in report_files:
@@ -1226,7 +1431,9 @@ def run_uat() -> tuple[str, list[dict]]:
     run_timestamp = now_iso()
     run_id = "SCE_UAT_" + datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    rscript_path = discover_rscript()
+    rscript_path = discover_rscript(config)
+    if rscript_path:
+        os.environ["SCE_UAT_RSCRIPT"] = rscript_path
     inventory = collect_environment_inventory(rscript_path)
 
     records.append(
@@ -1518,11 +1725,11 @@ def run_uat() -> tuple[str, list[dict]]:
 
     final_status = overall_status(records, required_ids - {"final_report_generation"})
     final_report_files = [
+        ROOT_FINAL_WORD_REPORT,
         ROOT / "reports" / "uat_validation_report.csv",
         ROOT / "reports" / "uat_validation_report.json",
         ROOT / "reports" / "uat_validation_report.html",
         ROOT / "reports" / "uat_validation_report.md",
-        ROOT / "reports" / "uat_validation_report.pdf",
         ROOT / "reports" / "run_manifest.json",
     ]
     records.append(
@@ -1532,7 +1739,7 @@ def run_uat() -> tuple[str, list[dict]]:
             "Python",
             "Final UAT report generation",
             "PASS",
-            "Final CSV, JSON, HTML, Markdown, PDF, and manifest reports generated.",
+            "Final root-level Word, CSV, JSON, HTML, Markdown, and manifest reports generated.",
             "Final report generation completed.",
             output_file="; ".join(safe_rel(path) for path in final_report_files),
         )
@@ -1613,7 +1820,7 @@ def write_emergency_error_report(exc: Exception) -> None:
     )
     markdown_text = build_markdown_report(now_iso(), "ERROR", inventory, [error_record])
     write_markdown_report(ROOT / "reports" / "uat_validation_report.md", markdown_text)
-    generate_pdf_report(ROOT / "reports" / "uat_validation_report.pdf", markdown_text)
+    write_docx_report(ROOT_FINAL_WORD_REPORT, now_iso(), "ERROR", inventory, [error_record])
     write_json(
         ROOT / "reports" / "run_manifest.json",
         {
@@ -1621,16 +1828,16 @@ def write_emergency_error_report(exc: Exception) -> None:
             "timestamp": now_iso(),
             "root_path": str(ROOT),
             "python_executable": sys.executable,
-            "rscript_path": discover_rscript() or "",
+            "rscript_path": discover_rscript(load_config()) or "",
             "overall_status": "ERROR",
             "report_files": [
+                safe_rel(ROOT_FINAL_WORD_REPORT),
                 "reports/environment_report.txt",
                 "reports/permission_report.txt",
                 "reports/uat_validation_report.csv",
                 "reports/uat_validation_report.json",
                 "reports/uat_validation_report.html",
                 "reports/uat_validation_report.md",
-                "reports/uat_validation_report.pdf",
                 "reports/run_manifest.json",
             ],
         },
@@ -1648,11 +1855,11 @@ def print_summary(status: str, records: list[dict]) -> None:
     print(f"NOT_AVAILABLE: {counts.get('NOT_AVAILABLE', 0)}")
     print("")
     print("Final report paths:")
+    print(f"- {ROOT_FINAL_WORD_REPORT}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.csv'}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.json'}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.html'}")
     print(f"- {ROOT / 'reports' / 'uat_validation_report.md'}")
-    print(f"- {ROOT / 'reports' / 'uat_validation_report.pdf'}")
     print(f"- {ROOT / 'reports' / 'run_manifest.json'}")
 
 
